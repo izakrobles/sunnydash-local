@@ -9,8 +9,10 @@ from cereal import messaging, custom
 from opendbc.car import structs
 from openpilot.common.constants import CV
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
+from openpilot.sunnypilot.selfdrive.controls.lib.accel_controller.accel_controller import AccelController
 from openpilot.sunnypilot.selfdrive.controls.lib.dec.dec import DynamicExperimentalController
 from openpilot.sunnypilot.selfdrive.controls.lib.e2e_alerts_helper import E2EAlertsHelper
+from openpilot.sunnypilot.selfdrive.controls.lib.longitudinal_mpc_sp import LongitudinalMpcSP
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.smart_cruise_control import SmartCruiseControl
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import SpeedLimitAssist
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver
@@ -32,6 +34,10 @@ class LongitudinalPlannerSP:
     self.generation = int(model_bundle.generation) if (model_bundle := get_active_bundle()) else None
     self.source = LongitudinalPlanSource.cruise
     self.e2e_alerts_helper = E2EAlertsHelper()
+
+    self.accel_ctrl = AccelController(CP, CP_SP)
+    mpc.__class__ = LongitudinalMpcSP
+    mpc.attach_accel_controller(self.accel_ctrl)
 
     self.output_v_target = 0.
     self.output_a_target = 0.
@@ -71,12 +77,15 @@ class LongitudinalPlannerSP:
 
     self.source = min(targets, key=lambda k: targets[k][0])
     self.output_v_target, self.output_a_target = targets[self.source]
+    self.output_a_target = self.accel_ctrl.modulate_a_target(self.output_a_target)
     return self.output_v_target, self.output_a_target
 
   def update(self, sm: messaging.SubMaster) -> None:
     self.events_sp.clear()
     self.dec.update(sm)
     self.e2e_alerts_helper.update(sm, self.events_sp)
+    cs = sm['carState']
+    self.accel_ctrl.update(sm, cs.vEgo, cs.aEgo)
 
   def publish_longitudinal_plan_sp(self, sm: messaging.SubMaster, pm: messaging.PubMaster) -> None:
     plan_sp_send = messaging.new_message('longitudinalPlanSP')
@@ -137,5 +146,16 @@ class LongitudinalPlannerSP:
     e2eAlerts = longitudinalPlanSP.e2eAlerts
     e2eAlerts.greenLightAlert = self.e2e_alerts_helper.green_light_alert
     e2eAlerts.leadDepartAlert = self.e2e_alerts_helper.lead_depart_alert
+
+    accelControl = longitudinalPlanSP.accelControl
+    accelControl.enabled = self.accel_ctrl.enabled
+    accelControl.personality = self.accel_ctrl.personality
+    accelControl.tFollowDelta = float(self.accel_ctrl.knobs.t_follow_delta)
+    accelControl.jCostMult = float(self.accel_ctrl.knobs.j_cost_mult)
+    accelControl.aChangeCostMult = float(self.accel_ctrl.knobs.a_change_cost_mult)
+    accelControl.obstacleCostBoost = float(self.accel_ctrl.obstacle_cost_boost)
+    accelControl.leadTauScale = float(self.accel_ctrl.knobs.lead_tau_scale)
+    accelControl.startBoost = float(self.accel_ctrl.start_boost)
+    accelControl.earlyBrakeDelta = float(self.accel_ctrl.early_brake_delta)
 
     pm.send('longitudinalPlanSP', plan_sp_send)
