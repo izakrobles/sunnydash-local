@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "cereal/gen/cpp/custom.capnp.h"
 #include "cereal/gen/cpp/log.capnp.h"
 
 inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
@@ -137,7 +138,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // --- sunnypilot params --- //
     {"ApiCache_DriveStats", {PERSISTENT, JSON}},
     {"AccelControllerEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
-    {"AccelPersonality", {PERSISTENT | BACKUP, INT, "1"}},
+    {"AccelPersonality", {PERSISTENT | BACKUP, INT, std::to_string(static_cast<int>(cereal::LongitudinalPlanSP::AccelPersonality::NORMAL))}},
     {"AutoLaneChangeBsmDelay", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"AutoLaneChangeTimer", {PERSISTENT | BACKUP, INT, "0"}},
     {"BlinkerLateralReengageDelay", {PERSISTENT | BACKUP, INT, "0"}},  // seconds
