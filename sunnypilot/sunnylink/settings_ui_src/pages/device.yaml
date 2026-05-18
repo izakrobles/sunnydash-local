@@ -59,6 +59,43 @@ sections:
       label: 24h
     - value: 1800
       label: 30h (Default)
+- id: private_dashcam
+  title: Private Dashcam
+  description: Self-hosted route media backup
+  items:
+  - key: PrivateDashcamEnabled
+    widget: toggle
+    title: Private Dashcam Uploads
+    description: Uploads completed route media to your self-hosted dashcam ingest API. Configure endpoint and token over SSH before enabling this.
+    enablement:
+    - $ref: '#/macros/offroad'
+  - key: PrivateDashcamBlockCommaUploads
+    widget: toggle
+    title: Block comma Uploads
+    description: Stops the stock comma uploader from sending route files to comma servers. Enable only after private uploads are configured and working.
+    enablement:
+    - $ref: '#/macros/offroad'
+    - type: param
+      key: PrivateDashcamEnabled
+      equals: true
+  - key: PrivateDashcamUploadOnroad
+    widget: toggle
+    title: Upload While Driving
+    description: Allows private dashcam uploads while onroad. Leave off to upload only after the drive ends.
+    enablement:
+    - $ref: '#/macros/offroad'
+    - type: param
+      key: PrivateDashcamEnabled
+      equals: true
+  - key: PrivateDashcamUploadMetered
+    widget: toggle
+    title: Upload on Metered Networks
+    description: Allows private dashcam uploads on metered networks.
+    enablement:
+    - $ref: '#/macros/offroad'
+    - type: param
+      key: PrivateDashcamEnabled
+      equals: true
 - id: language
   title: Language
   items:

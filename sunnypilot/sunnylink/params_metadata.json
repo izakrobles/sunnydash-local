@@ -1019,6 +1019,34 @@
     "title": "Onroad Uploads",
     "description": ""
   },
+  "PrivateDashcamBlockCommaUploads": {
+    "title": "Block comma Uploads",
+    "description": "Prevents the stock uploader from sending route files to comma servers. Keep this disabled until the private dashcam uploader endpoint and token are configured."
+  },
+  "PrivateDashcamDeviceId": {
+    "title": "Private Dashcam Device ID",
+    "description": "Optional device identifier used in private dashcam ingest URLs. If empty, the uploader uses DongleId, then HardwareSerial, then a generic fallback."
+  },
+  "PrivateDashcamEnabled": {
+    "title": "Private Dashcam Uploads",
+    "description": "Uploads completed route media to a self-hosted dashcam ingest API using private upload markers."
+  },
+  "PrivateDashcamEndpoint": {
+    "title": "Private Dashcam Endpoint",
+    "description": "Base URL for the self-hosted dashcam ingest API."
+  },
+  "PrivateDashcamToken": {
+    "title": "Private Dashcam Token",
+    "description": "Bearer token for the self-hosted dashcam ingest API. This value is excluded from device logs."
+  },
+  "PrivateDashcamUploadMetered": {
+    "title": "Private Dashcam Metered Uploads",
+    "description": "Allows private dashcam uploads on metered networks."
+  },
+  "PrivateDashcamUploadOnroad": {
+    "title": "Private Dashcam Onroad Uploads",
+    "description": "Allows private dashcam uploads while driving. Leave this disabled to upload only while offroad."
+  },
   "OpenpilotEnabledToggle": {
     "title": "Enable sunnypilot",
     "description": ""

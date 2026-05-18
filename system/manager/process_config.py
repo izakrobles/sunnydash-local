@@ -11,6 +11,7 @@ from openpilot.system.hardware.hw import Paths
 from openpilot.sunnypilot.mapd.mapd_manager import MAPD_PATH
 
 from openpilot.sunnypilot.models.helpers import get_active_model_runner
+from openpilot.sunnypilot.private_dashcam.uploader import should_run_private_dashcam_uploader
 from openpilot.sunnypilot.sunnylink.utils import sunnylink_need_register, sunnylink_ready, use_sunnylink_uploader
 
 WEBCAM = os.getenv("USE_WEBCAM") is not None
@@ -83,6 +84,10 @@ def use_sunnylink_uploader_shim(started, params, CP: car.CarParams) -> bool:
   """Shim for use_sunnylink_uploader to match the process manager signature."""
   return use_sunnylink_uploader(params)
 
+def private_dashcam_uploader_ready_shim(started, params, CP: car.CarParams) -> bool:
+  """Shim for should_run_private_dashcam_uploader to match the process manager signature."""
+  return should_run_private_dashcam_uploader(started, params)
+
 def is_tinygrad_model(started, params, CP: car.CarParams) -> bool:
   """Check if the active model runner is SNPE."""
   return bool(get_active_model_runner(params, not started) == custom.ModelManagerSP.Runner.tinygrad)
@@ -95,6 +100,9 @@ def mapd_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   return bool(os.path.exists(Paths.mapd_root()))
 
 def uploader_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
+  if params.get_bool("PrivateDashcamBlockCommaUploads"):
+    return False
+
   if not params.get_bool("OnroadUploads"):
     return only_offroad(started, params, CP)
 
@@ -151,6 +159,7 @@ procs = [
   PythonProcess("tombstoned", "system.tombstoned", always_run, enabled=not PC),
   PythonProcess("updated", "system.updated.updated", only_offroad, enabled=not PC),
   PythonProcess("uploader", "system.loggerd.uploader", uploader_ready),
+  PythonProcess("private_dashcam_uploader", "sunnypilot.private_dashcam.uploader", private_dashcam_uploader_ready_shim),
   PythonProcess("statsd", "system.statsd", always_run),
   PythonProcess("feedbackd", "selfdrive.ui.feedback.feedbackd", only_onroad),
 
