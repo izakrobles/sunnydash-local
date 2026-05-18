@@ -179,6 +179,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PrivateDashcamDeviceId", {PERSISTENT | BACKUP, STRING}},
     {"PrivateDashcamEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"PrivateDashcamEndpoint", {PERSISTENT | DONT_LOG, STRING}},
+    {"PrivateDashcamMaxSegmentsPerRun", {PERSISTENT | BACKUP, INT, "0"}},
     {"PrivateDashcamToken", {PERSISTENT | DONT_LOG, STRING}},
     {"PrivateDashcamUploadMetered", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"PrivateDashcamUploadOnroad", {PERSISTENT | BACKUP, BOOL, "0"}},

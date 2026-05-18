@@ -14,7 +14,9 @@ from openpilot.sunnypilot.private_dashcam.uploader import (
   build_manifest,
   discover_segments,
   filter_segments,
+  get_max_segments_per_run,
   parse_segment_dir_name,
+  stop_after_run_limit,
   upload_segment,
   xattr_is_true,
 )
@@ -32,6 +34,22 @@ class FakeUploader:
   def upload_bytes(self, *, segment, filename, body):
     self.bytes.append((segment.name, filename, body))
     return 201, "stored"
+
+
+class FakeParams:
+  def __init__(self, values=None):
+    self.values = dict(values or {})
+
+  def get(self, key):
+    return self.values.get(key)
+
+  def put_bool(self, key, value):
+    self.values[key] = "1" if value else "0"
+
+
+class FakeCloudlog:
+  def event(self, *args, **kwargs):
+    pass
 
 
 def set_xattr_or_skip(path: Path, name: str, value: bytes) -> None:
@@ -77,6 +95,7 @@ def test_filter_segments_skips_locked_and_already_uploaded_by_default(tmp_path):
   locked = write_segment_file(tmp_path, segment_name="0000013b--f0814c8efa--76")
   write_segment_file(tmp_path, segment_name="0000013b--f0814c8efa--76", filename="qcamera.ts.lock", body=b"")
   uploaded = write_segment_file(tmp_path, segment_name="0000013b--f0814c8efa--77")
+  (tmp_path / "0000013b--f0814c8efa--78").mkdir()
   set_xattr_or_skip(uploaded.parent, PRIVATE_SEGMENT_UPLOAD_ATTR_NAME, b"1")
 
   segments = discover_segments(tmp_path)
@@ -145,3 +164,31 @@ def test_build_manifest_includes_bookmark_and_hashes(tmp_path):
   assert manifest["bookmarked"] is True
   assert manifest["files"][0]["sha256"] == hashlib.sha256(b"qcamera").hexdigest()
 
+
+def test_get_max_segments_per_run_parses_positive_int_and_clamps_invalid(monkeypatch):
+  params = FakeParams({"PrivateDashcamMaxSegmentsPerRun": "3"})
+
+  assert get_max_segments_per_run(params) == 3
+
+  params.values["PrivateDashcamMaxSegmentsPerRun"] = "-2"
+  assert get_max_segments_per_run(params) == 0
+
+  params.values["PrivateDashcamMaxSegmentsPerRun"] = "bad"
+  assert get_max_segments_per_run(params) == 0
+
+  monkeypatch.setenv("DASHCAM_PRIVATE_MAX_SEGMENTS_PER_RUN", "1")
+  assert get_max_segments_per_run(params) == 1
+
+
+def test_stop_after_run_limit_disables_private_uploads(monkeypatch):
+  monkeypatch.setattr(
+    "openpilot.sunnypilot.private_dashcam.uploader.get_cloudlog",
+    lambda: FakeCloudlog(),
+  )
+  params = FakeParams({"PrivateDashcamEnabled": "1"})
+
+  assert stop_after_run_limit(params, uploaded_segments=0, max_segments_per_run=1) is False
+  assert params.values["PrivateDashcamEnabled"] == "1"
+
+  assert stop_after_run_limit(params, uploaded_segments=1, max_segments_per_run=1) is True
+  assert params.values["PrivateDashcamEnabled"] == "0"

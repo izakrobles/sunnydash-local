@@ -1035,6 +1035,10 @@
     "title": "Private Dashcam Endpoint",
     "description": "Base URL for the self-hosted dashcam ingest API."
   },
+  "PrivateDashcamMaxSegmentsPerRun": {
+    "title": "Private Dashcam Max Segments per Run",
+    "description": "Maximum number of segments the private uploader will upload before disabling itself. 0 means continuous uploads."
+  },
   "PrivateDashcamToken": {
     "title": "Private Dashcam Token",
     "description": "Bearer token for the self-hosted dashcam ingest API. This value is excluded from device logs."

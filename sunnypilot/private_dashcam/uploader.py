@@ -35,6 +35,7 @@ UPLOAD_ATTR_VALUE = b"1"
 DEFAULT_CHUNK_SIZE = 1024 * 1024
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_SLEEP_WHEN_IDLE = 60.0
+MAX_SEGMENTS_PER_RUN_PARAM = "PrivateDashcamMaxSegmentsPerRun"
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.|:-]{0,127}$")
 
 allow_sleep = bool(int(os.getenv("UPLOADER_SLEEP", "1")))
@@ -199,7 +200,7 @@ class PrivateDashcamUploader:
     self.uploader = HTTPUploader(config)
     self.last_segment = ""
 
-  def step(self) -> bool | None:
+  def step(self) -> SegmentUploadResult | None:
     segments = filter_segments(
       discover_segments(self.config.log_root),
       include_locked=False,
@@ -223,7 +224,7 @@ class PrivateDashcamUploader:
       "private_dashcam_upload_result",
       result=json.dumps(asdict(result), sort_keys=True),
     )
-    return result.status != "failed"
+    return result
 
 
 def discover_segments(log_root: Path) -> list[DeviceSegment]:
@@ -407,6 +408,8 @@ def filter_segments(
   for segment in segments:
     if segment.locked and not include_locked:
       continue
+    if not segment.files:
+      continue
     if segment.private_segment_uploaded and not force:
       continue
     filtered.append(segment)
@@ -491,6 +494,30 @@ def set_xattr_true(path: Path, name: str) -> None:
   os.setxattr(path, name, UPLOAD_ATTR_VALUE)
 
 
+def get_max_segments_per_run(params: "Params") -> int:
+  value = os.getenv("DASHCAM_PRIVATE_MAX_SEGMENTS_PER_RUN")
+  if value is None:
+    value = params.get(MAX_SEGMENTS_PER_RUN_PARAM)
+
+  try:
+    return max(int(value or 0), 0)
+  except (TypeError, ValueError):
+    return 0
+
+
+def stop_after_run_limit(params: "Params", *, uploaded_segments: int, max_segments_per_run: int) -> bool:
+  if max_segments_per_run <= 0 or uploaded_segments < max_segments_per_run:
+    return False
+
+  params.put_bool("PrivateDashcamEnabled", False)
+  get_cloudlog().event(
+    "private_dashcam_upload_limit_reached",
+    uploaded_segments=uploaded_segments,
+    max_segments_per_run=max_segments_per_run,
+  )
+  return True
+
+
 def should_run_private_dashcam_uploader(started: bool, params: "Params") -> bool:
   if not params.get_bool("PrivateDashcamEnabled"):
     return False
@@ -518,6 +545,7 @@ def main(exit_event: threading.Event | None = None) -> None:
   sm = messaging.SubMaster(["deviceState"])
   uploader: PrivateDashcamUploader | None = None
   active_config: UploaderConfig | None = None
+  uploaded_segments = 0
   backoff = 0.1
 
   while not exit_event.is_set():
@@ -538,6 +566,7 @@ def main(exit_event: threading.Event | None = None) -> None:
     if config != active_config:
       active_config = config
       uploader = PrivateDashcamUploader(config)
+      uploaded_segments = 0
 
     network_type = sm["deviceState"].networkType if not force_wifi else NetworkType.wifi
     if network_type == NetworkType.none:
@@ -551,12 +580,21 @@ def main(exit_event: threading.Event | None = None) -> None:
       continue
 
     try:
-      success = uploader.step() if uploader is not None else None
+      result = uploader.step() if uploader is not None else None
     except Exception as e:
+      result = None
       success = False
       get_cloudlog().event("private_dashcam_upload_failed", exc=(e, traceback.format_exc()))
+    else:
+      success = result is not None and result.status != "failed"
+      if result is not None and result.status == "uploaded":
+        uploaded_segments += 1
 
-    if success is None:
+    max_segments_per_run = get_max_segments_per_run(params)
+    if stop_after_run_limit(params, uploaded_segments=uploaded_segments, max_segments_per_run=max_segments_per_run):
+      break
+
+    if result is None:
       backoff = 60 if params.get_bool("IsOffroad") else 5
     elif success:
       backoff = 0.1

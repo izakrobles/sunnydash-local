@@ -96,6 +96,16 @@ sections:
     - type: param
       key: PrivateDashcamEnabled
       equals: true
+  - key: PrivateDashcamMaxSegmentsPerRun
+    widget: option
+    title: Max Segments per Run
+    description: Limits private uploader batches. Set to 1 for controlled testing; 0 means continuous uploads.
+    min: 0
+    max: 100
+    step: 1
+    unit: segment
+    enablement:
+    - $ref: '#/macros/offroad'
 - id: language
   title: Language
   items:
