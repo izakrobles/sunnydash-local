@@ -296,6 +296,26 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     greenLightAlert @0 :Bool;
     leadDepartAlert @1 :Bool;
   }
+
+  accelControl @8 :AccelControl;
+
+  struct AccelControl {
+    enabled @0 :Bool;
+    personality @1 :AccelPersonality;
+    tFollowDelta @2 :Float32;
+    jCostMult @3 :Float32;
+    aChangeCostMult @4 :Float32;
+    obstacleCostBoost @5 :Float32;
+    leadTauScale @6 :Float32;
+    startBoost @7 :Float32;
+    earlyBrakeDelta @8 :Float32;
+  }
+
+  enum AccelPersonality {
+    eco @0;
+    normal @1;
+    sport @2;
+  }
 }
 
 struct OnroadEventSP @0xda96579883444c35 {
