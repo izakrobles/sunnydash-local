@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
+import math
 import os
 import random
 import re
@@ -11,6 +12,7 @@ import threading
 import time
 import traceback
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 from urllib.parse import quote, urlsplit
@@ -393,7 +395,143 @@ def build_manifest(segment: DeviceSegment, *, device_id: str) -> bytes:
     "preserve_context_after": 1,
     "files": files,
   }
+  payload.update(build_segment_metadata(segment))
   return (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode("utf-8")
+
+
+def build_segment_metadata(segment: DeviceSegment) -> dict[str, object]:
+  metadata = _log_metadata(segment)
+  duration = metadata.get("duration_seconds")
+  fallback_recorded_at, fallback_ended_at = _fallback_wall_times(segment, duration if isinstance(duration, float) else None)
+
+  metadata.setdefault("recorded_at", fallback_recorded_at)
+  metadata.setdefault("ended_at", fallback_ended_at)
+  if metadata.get("ended_at") is None and metadata.get("recorded_at") is not None and isinstance(duration, float):
+    started = datetime.fromisoformat(str(metadata["recorded_at"]))
+    metadata["ended_at"] = (started + timedelta(seconds=duration)).isoformat(timespec="seconds")
+
+  return {key: value for key, value in metadata.items() if value is not None and value != []}
+
+
+def _log_metadata(segment: DeviceSegment) -> dict[str, object]:
+  rlog = next((file.path for file in segment.files if file.filename == "rlog.zst"), None)
+  if rlog is None or not rlog.is_file():
+    return {}
+
+  try:
+    from openpilot.tools.lib.logreader import LogReader
+  except Exception:
+    return {}
+
+  start_mono: int | None = None
+  end_mono: int | None = None
+  recorded_at: datetime | None = None
+  gps_points: list[tuple[float, float]] = []
+  speed_samples: list[dict[str, float]] = []
+  last_sample_second = -1
+  max_speed_mps: float | None = None
+
+  try:
+    events = LogReader(str(rlog))
+    for msg in events:
+      mono = int(msg.logMonoTime)
+      which = msg.which()
+      if which not in {"gpsLocationExternal", "gpsLocation", "carState"}:
+        continue
+      if start_mono is None:
+        start_mono = mono
+      end_mono = mono
+      offset = max((mono - start_mono) / 1e9, 0.0)
+
+      if which in {"gpsLocationExternal", "gpsLocation"}:
+        gps = getattr(msg, which)
+        if _gps_has_fix(gps):
+          latitude = _optional_float(getattr(gps, "latitude", None))
+          longitude = _optional_float(getattr(gps, "longitude", None))
+          if latitude is not None and longitude is not None and (latitude != 0 or longitude != 0):
+            gps_points.append((latitude, longitude))
+            timestamp_ms = _optional_float(getattr(gps, "unixTimestampMillis", None))
+            if recorded_at is None and timestamp_ms:
+              recorded_at = datetime.fromtimestamp(timestamp_ms / 1000, UTC) - timedelta(seconds=offset)
+          speed = _optional_float(getattr(gps, "speed", None))
+          if speed is not None:
+            max_speed_mps = max(speed, max_speed_mps or 0.0)
+
+      if which == "carState":
+        speed = _optional_float(getattr(msg.carState, "vEgo", None))
+        if speed is not None and speed >= 0:
+          max_speed_mps = max(speed, max_speed_mps or 0.0)
+          sample_second = int(offset)
+          if sample_second > last_sample_second and len(speed_samples) < 180:
+            speed_samples.append({"offset_seconds": round(offset, 1), "speed_mps": round(speed, 3)})
+            last_sample_second = sample_second
+  except Exception:
+    return {}
+
+  duration_seconds = round((end_mono - start_mono) / 1e9, 1) if start_mono is not None and end_mono is not None else None
+  distance_meters = _gps_distance_meters(gps_points) if len(gps_points) >= 2 else None
+
+  metadata: dict[str, object] = {
+    "recorded_at": recorded_at.isoformat(timespec="seconds") if recorded_at else None,
+    "duration_seconds": duration_seconds,
+    "distance_meters": round(distance_meters, 1) if distance_meters is not None else None,
+    "max_speed_mps": round(max_speed_mps, 3) if max_speed_mps is not None else None,
+    "speed_samples": speed_samples,
+  }
+  if gps_points:
+    metadata.update(
+      {
+        "start_latitude": round(gps_points[0][0], 7),
+        "start_longitude": round(gps_points[0][1], 7),
+        "end_latitude": round(gps_points[-1][0], 7),
+        "end_longitude": round(gps_points[-1][1], 7),
+      }
+    )
+  return metadata
+
+
+def _fallback_wall_times(segment: DeviceSegment, duration_seconds: float | None) -> tuple[str | None, str | None]:
+  try:
+    newest_mtime = max([segment.path.stat().st_mtime] + [file.path.stat().st_mtime for file in segment.files])
+  except OSError:
+    return None, None
+  ended_at = datetime.fromtimestamp(newest_mtime, UTC)
+  if duration_seconds is None:
+    return None, ended_at.isoformat(timespec="seconds")
+  started_at = ended_at - timedelta(seconds=duration_seconds)
+  return started_at.isoformat(timespec="seconds"), ended_at.isoformat(timespec="seconds")
+
+
+def _gps_has_fix(gps) -> bool:
+  try:
+    return bool(gps.hasFix)
+  except Exception:
+    return True
+
+
+def _optional_float(value) -> float | None:
+  try:
+    number = float(value)
+  except (TypeError, ValueError):
+    return None
+  return number if math.isfinite(number) else None
+
+
+def _gps_distance_meters(points: list[tuple[float, float]]) -> float:
+  distance = 0.0
+  for start, end in zip(points, points[1:]):
+    distance += _haversine_meters(start[0], start[1], end[0], end[1])
+  return distance
+
+
+def _haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+  radius = 6_371_000.0
+  phi1 = math.radians(lat1)
+  phi2 = math.radians(lat2)
+  d_phi = math.radians(lat2 - lat1)
+  d_lambda = math.radians(lon2 - lon1)
+  a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+  return radius * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def filter_segments(
