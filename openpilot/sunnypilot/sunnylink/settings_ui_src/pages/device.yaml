@@ -69,6 +69,10 @@ sections:
     description: Uploads completed route media to your self-hosted dashcam ingest API. Configure endpoint and token over SSH before enabling this.
     enablement:
     - $ref: '#/macros/offroad'
+  - key: PrivateDashcamBlockCloud
+    widget: toggle
+    title: Block comma & sunnylink Cloud
+    description: Stops every connection to comma and sunnylink servers, including this settings page. Turn it back off from the device's sunnylink settings.
   - key: PrivateDashcamBlockCommaUploads
     widget: toggle
     title: Block comma Uploads

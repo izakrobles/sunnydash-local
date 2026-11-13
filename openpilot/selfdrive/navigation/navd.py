@@ -11,6 +11,7 @@ from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.navigation.helpers import latest_gps_source
 from openpilot.selfdrive.navigation.route import along_path, local_meters
+from openpilot.sunnypilot.private_dashcam.cloud_block import CloudBlockedError, cloud_blocked
 
 REROUTE_DISTANCE = 25
 MANEUVER_TRANSITION_THRESHOLD = 10
@@ -120,6 +121,9 @@ class RouteEngine:
     coords_str = ';'.join(f'{lon},{lat}' for lon, lat in (self.last_position, destination))
     url = self.mapbox_host + '/directions/v5/mapbox/driving-traffic/' + coords_str
     try:
+      # sunnydash: this hits comma's routing proxy directly (not via BaseApi), so check the block here too
+      if self.api is not None and cloud_blocked(self.params):
+        raise CloudBlockedError("comma navigation proxy blocked")
       resp = requests.get(url, params=params, timeout=10)
       if resp.status_code != 200:
         cloudlog.event("API request failed", status_code=resp.status_code, text=resp.text, error=True)

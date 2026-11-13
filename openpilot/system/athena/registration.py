@@ -13,6 +13,7 @@ from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.hardware.hw import Paths
 from openpilot.common.swaglog import cloudlog
+from openpilot.sunnypilot.private_dashcam.cloud_block import cloud_blocked
 
 
 UNREGISTERED_DONGLE_ID = "UnregisteredDevice"
@@ -46,6 +47,10 @@ def register(show_spinner=False) -> str | None:
   if not public_key:
     dongle_id = UNREGISTERED_DONGLE_ID
     cloudlog.warning("missing public key")
+  elif dongle_id is None and cloud_blocked(params):
+    # sunnydash: don't send IMEI/serial to comma. Not persisted, so turning the block off registers on next boot.
+    cloudlog.warning("cloud blocked, skipping comma registration")
+    return UNREGISTERED_DONGLE_ID
   elif dongle_id is None:
     if show_spinner:
       spinner = Spinner()

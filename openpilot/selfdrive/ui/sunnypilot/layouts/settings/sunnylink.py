@@ -145,11 +145,19 @@ class SunnylinkLayout(Widget):
     self._restore_in_progress = False
     self._backup_in_progress = False
     self._sunnylink_enabled = ui_state.params.get("SunnylinkEnabled")
+    self._cloud_blocked = ui_state.params.get_bool("PrivateDashcamBlockCloud")
 
     items = self._initialize_items()
     self._scroller = Scroller(items, line_separator=False, spacing=0)
 
   def _initialize_items(self):
+    self._cloud_block_toggle = toggle_item_sp(
+      title=tr("Block comma & sunnylink cloud"),
+      description=tr("Stops every connection to comma and sunnylink servers: remote access, uploads, registration, logs, stats and backups. ") +
+                  tr("Software updates, model downloads and your private dashcam uploads still work."),
+      param="PrivateDashcamBlockCloud",
+    )
+
     self._sunnylink_toggle = toggle_item_sp(
       title=tr("Enable sunnylink"),
       description=tr("This is the master switch, it will allow you to cutoff any sunnylink requests should you want to do that."),
@@ -194,6 +202,8 @@ class SunnylinkLayout(Widget):
 
     items = [
       SunnylinkHeader(),
+      LineSeparator(),
+      self._cloud_block_toggle,
       LineSeparator(),
       self._sunnylink_toggle,
       self._sunnylink_description,
@@ -297,7 +307,7 @@ class SunnylinkLayout(Widget):
         gui_app.push_widget(dialog)
 
     else:
-      can_enable = self._sunnylink_enabled and not ui_state.is_onroad()
+      can_enable = self._sunnylink_enabled and not self._cloud_blocked and not ui_state.is_onroad()
       self._backup_btn.set_enabled(can_enable)
       self._backup_btn.set_text(tr("Backup Settings"))
       self._restore_btn.set_enabled(can_enable)
@@ -336,21 +346,23 @@ class SunnylinkLayout(Widget):
   def _update_state(self):
     super()._update_state()
     self._sunnylink_enabled = ui_state.params.get_bool("SunnylinkEnabled")
+    self._cloud_blocked = ui_state.params.get_bool("PrivateDashcamBlockCloud")
+    self._cloud_block_toggle.action_item.set_state(self._cloud_blocked)
     self._sunnylink_toggle.set_right_value(tr("Dongle ID") + ": " + self._get_sunnylink_dongle_id())
-    self._sunnylink_toggle.action_item.set_enabled(not ui_state.is_onroad())
+    self._sunnylink_toggle.action_item.set_enabled(not self._cloud_blocked and not ui_state.is_onroad())
     self._sunnylink_toggle.action_item.set_state(self._sunnylink_enabled)
-    self._sunnylink_uploader_toggle.action_item.set_enabled(self._sunnylink_enabled)
+    self._sunnylink_uploader_toggle.action_item.set_enabled(self._sunnylink_enabled and not self._cloud_blocked)
     self.handle_backup_restore_progress()
 
     sponsor_btn_text = tr("THANKS ♥") if ui_state.sunnylink_state.is_sponsor() else tr("SPONSOR")
     tier_name = ui_state.sunnylink_state.get_sponsor_tier().name.capitalize() or tr("Not Sponsor")
     self._sponsor_btn.action_item.set_text(sponsor_btn_text)
     self._sponsor_btn.action_item.set_value(tier_name, ui_state.sunnylink_state.get_sponsor_tier_color())
-    self._sponsor_btn.action_item.set_enabled(self._sunnylink_enabled)
+    self._sponsor_btn.action_item.set_enabled(self._sunnylink_enabled and not self._cloud_blocked)
 
     pair_btn_text = tr("Paired") if ui_state.sunnylink_state.is_paired() else tr("Not Paired")
     self._pair_btn.action_item.set_text(pair_btn_text)
-    self._pair_btn.action_item.set_enabled(self._sunnylink_enabled)
+    self._pair_btn.action_item.set_enabled(self._sunnylink_enabled and not self._cloud_blocked)
 
   def _render(self, rect):
     self._scroller.render(rect)

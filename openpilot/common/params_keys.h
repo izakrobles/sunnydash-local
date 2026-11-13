@@ -192,6 +192,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"OnroadScreenOffTimer", {PERSISTENT | BACKUP, INT, "15"}},
     {"OnroadScreenOffTimerMigrated", {PERSISTENT | BACKUP, STRING, "0.0"}},
     {"OnroadUploads", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"PrivateDashcamBlockCloud", {PERSISTENT, BOOL, "1"}},
     {"PrivateDashcamBlockCommaUploads", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"PrivateDashcamDeviceId", {PERSISTENT | BACKUP, STRING}},
     {"PrivateDashcamEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},

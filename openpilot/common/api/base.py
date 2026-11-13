@@ -53,6 +53,11 @@ class BaseApi:
     return ascii_encoded_text.decode()
 
   def api_get(self, endpoint, method='GET', timeout=None, access_token=None, session=None, json=None, **params):
+    # sunnydash: single chokepoint for every comma and sunnylink HTTP call
+    from openpilot.sunnypilot.private_dashcam.cloud_block import CloudBlockedError, cloud_blocked
+    if cloud_blocked():
+      raise CloudBlockedError(f"cloud access blocked: {self.api_host}/{endpoint}")
+
     headers = {}
     if access_token is not None:
       headers['Authorization'] = "JWT " + access_token

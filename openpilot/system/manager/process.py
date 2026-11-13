@@ -186,10 +186,35 @@ class DaemonProcess(ManagerProcess):
     self.param_name = param_name
     self.enabled = enabled
     self.params = None
+    # sunnydash: daemons normally survive manager restarts; set this to kill one whenever it shouldn't be running
+    self.kill_when_not_running = False
 
   @staticmethod
   def should_run(started, params, CP):
     return True
+
+  def kill_daemon(self) -> None:
+    if self.params is None:
+      self.params = Params()
+
+    pid = self.params.get(self.param_name)
+    if pid is None:
+      return
+
+    try:
+      with open(f'/proc/{pid}/cmdline') as f:
+        running = self.module in f.read()
+    except OSError:
+      running = False
+
+    if running:
+      cloudlog.info(f"killing daemon {self.name}")
+      try:
+        # started with setpgrp, so this also takes out children (e.g. athenad under manage_athenad)
+        os.killpg(int(pid), signal.SIGTERM)
+      except OSError:
+        pass
+    self.params.remove(self.param_name)
 
   def start(self) -> None:
     if self.params is None:
@@ -231,6 +256,8 @@ def ensure_running(procs: ValuesView[ManagerProcess], started: bool, params: Par
       running.append(p)
     else:
       p.stop(block=False)
+      if isinstance(p, DaemonProcess) and p.kill_when_not_running:
+        p.kill_daemon()
 
   for p in running:
     p.start()

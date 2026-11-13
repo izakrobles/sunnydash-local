@@ -1741,6 +1741,12 @@
               ]
             },
             {
+              "key": "PrivateDashcamBlockCloud",
+              "widget": "toggle",
+              "title": "Block comma & sunnylink Cloud",
+              "description": "Stops every connection to comma and sunnylink servers, including this settings page. Turn it back off from the device's sunnylink settings."
+            },
+            {
               "key": "PrivateDashcamBlockCommaUploads",
               "widget": "toggle",
               "title": "Block comma Uploads",
