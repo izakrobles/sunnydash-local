@@ -7,6 +7,7 @@ from openpilot.common.realtime import DT_DMON
 from openpilot.selfdrive.monitoring.policy import DriverMonitoring, DRIVER_MONITOR_SETTINGS
 
 EventName = log.OnroadEvent.EventName
+AlertLevel = log.DriverMonitoringState.AlertLevel
 dm_settings = DRIVER_MONITOR_SETTINGS()
 
 TEST_TIMESPAN = 120  # seconds
@@ -279,3 +280,101 @@ class TestRunStepEngagement(OpenpilotTestCase):
     dm.run_step(sm, demo=False)
     assert captured['op_engaged'] == expected_op_engaged
     assert captured['driver_engaged'] == expected_driver_engaged
+
+
+ONE_SECOND = int(1 / DT_DMON)
+
+
+class TestConfidenceEarlyAlert(OpenpilotTestCase):
+  def _run_early_seq(self, msgs, scene_confidence, enabled=True, threshold=80, engaged=True, lowspeed=False):
+    dm = DriverMonitoring()
+    dm.set_early_alert(enabled, threshold)
+    alert_lvls = []
+    for msg in msgs:
+      dm.scene_confidence_filter.x = scene_confidence
+      dm._update_states(msg, [0, 0, 0], 0, engaged, lowspeed)
+      dm._update_events(False, engaged, lowspeed, False)
+      alert_lvls.append(dm.alert_level)
+    return alert_lvls, dm
+
+  def test_disabled_keeps_stock_timing(self):
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, enabled=False)
+    assert alert_lvls[ONE_SECOND] == AlertLevel.none
+    assert alert_lvls[int(dm_settings._VISION_POLICY_ALERT_1_TIMEOUT / 2 / DT_DMON)] == AlertLevel.none
+
+  def test_low_confidence_chimes_within_a_second(self):
+    alert_lvls, dm = self._run_early_seq(always_distracted, 0.5)
+    assert alert_lvls[ONE_SECOND] == AlertLevel.one
+    assert dm.early_alert_active
+
+  def test_low_confidence_keeps_stock_orange_and_red(self):
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5)
+    stock_lvls, _ = self._run_early_seq(always_distracted, 0.5, enabled=False)
+    # escalation past the early chime is untouched, so lockout risk doesn't change
+    assert alert_lvls.index(AlertLevel.two) == stock_lvls.index(AlertLevel.two)
+    assert alert_lvls.index(AlertLevel.three) == stock_lvls.index(AlertLevel.three)
+    assert alert_lvls[int(DISTRACTED_SECONDS_TO_ORANGE / DT_DMON)] == AlertLevel.two
+    assert alert_lvls[int(DISTRACTED_SECONDS_TO_RED / DT_DMON)] == AlertLevel.three
+
+  def test_confidence_above_threshold_keeps_stock_timing(self):
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.9, threshold=80)
+    assert alert_lvls[ONE_SECOND] == AlertLevel.none
+    assert alert_lvls[int(dm_settings._VISION_POLICY_ALERT_1_TIMEOUT / 2 / DT_DMON)] == AlertLevel.none
+
+  def test_threshold_is_respected(self):
+    # 85% confidence chimes early with a 90% threshold, but not with an 80% one
+    lvls_90, _ = self._run_early_seq(always_distracted, 0.85, threshold=90)
+    lvls_80, _ = self._run_early_seq(always_distracted, 0.85, threshold=80)
+    assert lvls_90[ONE_SECOND] == AlertLevel.one
+    assert lvls_80[ONE_SECOND] == AlertLevel.none
+
+  def test_clears_when_driver_looks_back(self):
+    msgs = [msg_DISTRACTED] * ONE_SECOND + [msg_ATTENTIVE] * ONE_SECOND
+    alert_lvls, dm = self._run_early_seq(msgs, 0.5)
+    assert alert_lvls[ONE_SECOND - 1] == AlertLevel.one
+    assert alert_lvls[-1] == AlertLevel.none
+    assert not dm.early_alert_active
+
+  def test_attentive_driver_never_alerted(self):
+    alert_lvls, _ = self._run_early_seq(always_attentive, 0.0)
+    assert all(a == AlertLevel.none for a in alert_lvls)
+
+  def test_no_early_alert_at_low_speed(self):
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, lowspeed=True)
+    assert alert_lvls[ONE_SECOND] == AlertLevel.none
+
+  def test_no_early_alert_when_disengaged(self):
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, engaged=False)
+    assert all(a == AlertLevel.none for a in alert_lvls)
+
+  def test_no_early_alert_without_face(self):
+    # wheel-touch fallback can't tell where the driver is looking, so stock timing applies
+    alert_lvls, _ = self._run_early_seq(always_no_face, 0.5)
+    assert alert_lvls[ONE_SECOND] == AlertLevel.none
+
+  @parameterized.expand([(50, 0.70), (70, 0.70), (85, 0.85), (95, 0.95), (100, 0.95), (None, 0.80)])
+  def test_threshold_is_clamped(self, percent, expected):
+    dm = DriverMonitoring()
+    dm.set_early_alert(True, percent)
+    assert abs(dm.early_alert_confidence - expected) < 1e-9
+
+  def test_scene_confidence_formula(self):
+    dm = DriverMonitoring()
+    for _ in range(20 * ONE_SECOND):
+      dm._update_scene_confidence([0.1, 0.2, 0.3], [0.0, 0.5])
+    assert abs(dm.scene_confidence_filter.x - (1 - 0.3) * (1 - 0.5)) < 1e-3
+
+  def test_missing_predictions_mean_full_confidence(self):
+    dm = DriverMonitoring()
+    for _ in range(20 * ONE_SECOND):
+      dm._update_scene_confidence([], [])
+    assert abs(dm.scene_confidence_filter.x - 1.0) < 1e-6
+
+  def test_run_step_reads_model_confidence(self):
+    sm = _build_sm(True, False, False, False)
+    sm['modelV2'].meta.disengagePredictions.brakeDisengageProbs = [0.4]
+    sm['modelV2'].meta.disengagePredictions.steerOverrideProbs = [0.0]
+    dm = DriverMonitoring()
+    for _ in range(20 * ONE_SECOND):
+      dm.run_step(sm, demo=False)
+    assert abs(dm.scene_confidence_filter.x - 0.6) < 1e-3

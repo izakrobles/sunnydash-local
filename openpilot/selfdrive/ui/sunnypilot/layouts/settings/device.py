@@ -11,7 +11,7 @@ from openpilot.common.hardware import HARDWARE
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.sunnypilot.widgets.list_view import option_item_sp, multiple_button_item_sp, button_item_sp, \
-  dual_button_item_sp, Spacer
+  dual_button_item_sp, toggle_item_sp, Spacer
 from openpilot.system.ui.widgets import DialogResult
 from openpilot.system.ui.widgets.button import ButtonStyle
 from openpilot.system.ui.widgets.confirm_dialog import alert_dialog, ConfirmDialog
@@ -68,6 +68,24 @@ class DeviceLayoutSP(DeviceLayout):
       label_callback=self._update_max_time_offroad_label
     )
 
+    self._dm_early_alert_toggle = toggle_item_sp(
+      param="DriverMonitorEarlyAlert",
+      title=lambda: tr("Confidence-Based Early Alert"),
+      description=lambda: tr("Chime as soon as you look away from the road when the driving model's confidence in the " +
+                             "scene drops below the threshold below. Above the threshold, stock driver monitoring timing applies. " +
+                             "This chime plays even when Quiet Mode is on."),
+    )
+    self._dm_early_alert_confidence = option_item_sp(
+      param="DriverMonitorEarlyAlertConfidence",
+      title=lambda: tr("Early Alert Below Confidence"),
+      description=lambda: tr("Scene confidence below which distraction chimes immediately instead of after 5 seconds."),
+      min_value=70,
+      max_value=95,
+      value_change_step=5,
+      label_callback=lambda value: f"{value}%",
+      inline=True,
+    )
+
     self._device_wake_mode = multiple_button_item_sp(
       title=lambda: tr("Wake Up Behavior"),
       description=self.wake_mode_description,
@@ -122,6 +140,9 @@ class DeviceLayoutSP(DeviceLayout):
       self._device_wake_mode,
       LineSeparator(),
       self._max_time_offroad,
+      LineSeparator(),
+      self._dm_early_alert_toggle,
+      self._dm_early_alert_confidence,
       LineSeparator(height=10),
       self._quiet_mode_and_dcam,
       self._reg_and_training,
@@ -188,6 +209,8 @@ class DeviceLayoutSP(DeviceLayout):
 
   def _update_state(self):
     super()._update_state()
+
+    self._dm_early_alert_confidence.set_visible(self._dm_early_alert_toggle.action_item.get_state())
 
     # Handle Always Offroad button
     always_offroad = ui_state.params.get_bool("OffroadMode")

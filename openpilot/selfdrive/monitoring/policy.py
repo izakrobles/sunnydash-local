@@ -88,6 +88,14 @@ class DRIVER_MONITOR_SETTINGS:
     self._WHEELPOS_DATA_VAR = 3*5.5e-5
     self._WHEELPOS_MAX_COUNT = -1
 
+    # sunnydash: confidence-based early alert. Only ever adds an earlier alert_1; never delays or removes stock alerts.
+    self._EARLY_ALERT_CONFIDENCE_MIN = 0.70
+    self._EARLY_ALERT_CONFIDENCE_MAX = 0.95
+    self._EARLY_ALERT_CONFIDENCE_DEFAULT = 0.80
+    self._SCENE_CONFIDENCE_FILTER_TS = 1.0  # smooth model confidence so the threshold doesn't flicker
+    self._EARLY_ALERT_DISTRACTED_ON = 0.63  # same filter level stock treats as "certainly distracted"
+    self._EARLY_ALERT_DISTRACTED_OFF = 0.37  # same filter level stock treats as "paying attention"
+
 class DriverPose:
   def __init__(self, settings):
     pitch_filter_raw_priors = (settings._PITCH_NATURAL_OFFSET, settings._PITCH_NATURAL_VAR, 2)
@@ -169,8 +177,45 @@ class DriverMonitoring:
     self.dcam_uncertain_cnt = 0
     self.dcam_reset_cnt = 0
 
+    self.early_alert_enabled = False
+    self.early_alert_confidence = self.settings._EARLY_ALERT_CONFIDENCE_DEFAULT
+    self.early_alert_active = False
+    self.scene_confidence_filter = FirstOrderFilter(1., self.settings._SCENE_CONFIDENCE_FILTER_TS, DT_DMON)
+
     self._reset_awareness()
     self._set_policy(MonitoringPolicy.vision)
+
+  def set_early_alert(self, enabled, confidence_percent):
+    s = self.settings
+    threshold = (confidence_percent if confidence_percent is not None else s._EARLY_ALERT_CONFIDENCE_DEFAULT * 100.) / 100.
+    self.early_alert_enabled = bool(enabled)
+    self.early_alert_confidence = min(max(threshold, s._EARLY_ALERT_CONFIDENCE_MIN), s._EARLY_ALERT_CONFIDENCE_MAX)
+    if not self.early_alert_enabled:
+      self.early_alert_active = False
+
+  def _update_scene_confidence(self, brake_disengage_probs, steer_override_probs):
+    # same formula as comma's onroad confidence ball: chance the driver will NOT need to brake or steer
+    confidence = (1. - max(brake_disengage_probs or [0.])) * (1. - max(steer_override_probs or [0.]))
+    self.scene_confidence_filter.update(min(max(confidence, 0.), 1.))
+
+  def _update_early_alert(self, op_engaged, lowspeed, wrong_gear):
+    s = self.settings
+    monitoring_active = op_engaged or (self.always_on and not wrong_gear)
+    eligible = (self.early_alert_enabled and monitoring_active and not lowspeed and
+                self.active_policy == MonitoringPolicy.vision and self.face_detected and self.pose.low_std)
+
+    if not eligible:
+      self.early_alert_active = False
+    elif self.early_alert_active:
+      # once chimed, stay up until the driver is clearly looking back, so the chime doesn't retrigger on flicker
+      self.early_alert_active = self.driver_distraction_filter.x >= s._EARLY_ALERT_DISTRACTED_OFF
+    else:
+      certainly_distracted = self.driver_distraction_filter.x > s._EARLY_ALERT_DISTRACTED_ON and self.driver_distracted
+      low_confidence = self.scene_confidence_filter.x < self.early_alert_confidence
+      self.early_alert_active = certainly_distracted and low_confidence
+
+    if self.early_alert_active and self.alert_level == AlertLevel.none:
+      self.alert_level = AlertLevel.one
 
   def _reset_awareness(self):
     self.awareness = 1.
@@ -312,6 +357,10 @@ class DriverMonitoring:
       self.hi_stds = 0
 
   def _update_events(self, driver_engaged, op_engaged, lowspeed, wrong_gear):
+    self._update_awareness_events(driver_engaged, op_engaged, lowspeed, wrong_gear)
+    self._update_early_alert(op_engaged, lowspeed, wrong_gear)
+
+  def _update_awareness_events(self, driver_engaged, op_engaged, lowspeed, wrong_gear):
     self.alert_level = AlertLevel.none
     self.driver_interacting = driver_engaged
 
@@ -438,6 +487,7 @@ class DriverMonitoring:
       brake_disengage_prob = 1.0
       steering_angle_deg = 0.0
       rpyCalib = [0., 0., 0.]
+      brake_disengage_probs, steer_override_probs = [], []
     else:
       car_speed = sm['carState'].vEgo
       enabled = sm['selfdriveState'].enabled or sm['carControl'].latActive
@@ -447,6 +497,11 @@ class DriverMonitoring:
       brake_disengage_prob = sm['modelV2'].meta.disengagePredictions.brakeDisengageProbs[0] # brake disengage prob in next 2s
       steering_angle_deg = sm['carState'].steeringAngleDeg
       rpyCalib = sm['extrinsicsCalibration'].rpyCalib
+      disengage_predictions = sm['modelV2'].meta.disengagePredictions
+      brake_disengage_probs = list(disengage_predictions.brakeDisengageProbs)
+      steer_override_probs = list(disengage_predictions.steerOverrideProbs)
+
+    self._update_scene_confidence(brake_disengage_probs, steer_override_probs)
 
     self._set_pose_strictness(
       brake_disengage_prob=brake_disengage_prob,

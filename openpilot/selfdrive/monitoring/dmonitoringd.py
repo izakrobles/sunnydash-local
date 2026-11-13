@@ -14,6 +14,7 @@ def dmonitoringd_thread():
                             'carControl'], poll='driverStateV2')
 
   DM = DriverMonitoring(rhd_saved=params.get_bool("IsRhdDetected"), always_on=params.get_bool("AlwaysOnDM"))
+  DM.set_early_alert(params.get_bool("DriverMonitorEarlyAlert"), params.get("DriverMonitorEarlyAlertConfidence"))
   demo_mode=False
 
   # 20Hz <- dmonitoringmodeld
@@ -36,6 +37,7 @@ def dmonitoringd_thread():
     # load live always-on toggle
     if sm['driverStateV2'].frameId % 40 == 1:
       DM.always_on = params.get_bool("AlwaysOnDM")
+      DM.set_early_alert(params.get_bool("DriverMonitorEarlyAlert"), params.get("DriverMonitorEarlyAlertConfidence"))
       demo_mode = params.get_bool("IsDriverViewEnabled")
 
     # save rhd virtual toggle every 5 mins

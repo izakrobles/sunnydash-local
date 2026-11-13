@@ -1806,6 +1806,36 @@
           ]
         },
         {
+          "id": "driver_monitoring_early_alert",
+          "title": "Driver Monitoring",
+          "description": "Earlier distraction chimes when the driving model is less confident in the scene",
+          "items": [
+            {
+              "key": "DriverMonitorEarlyAlert",
+              "widget": "toggle",
+              "title": "Confidence-Based Early Alert",
+              "description": "Chime as soon as you look away from the road when the driving model's confidence in the scene drops below the threshold. Above the threshold, stock driver monitoring timing applies. This chime plays even when Quiet Mode is on."
+            },
+            {
+              "key": "DriverMonitorEarlyAlertConfidence",
+              "widget": "option",
+              "title": "Early Alert Below Confidence",
+              "description": "Scene confidence below which distraction chimes immediately instead of after 5 seconds.",
+              "min": 70,
+              "max": 95,
+              "step": 5,
+              "unit": "%",
+              "enablement": [
+                {
+                  "type": "param",
+                  "key": "DriverMonitorEarlyAlert",
+                  "equals": true
+                }
+              ]
+            }
+          ]
+        },
+        {
           "id": "language",
           "title": "Language",
           "items": [

@@ -169,6 +169,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CustomAccShortPressIncrement", {PERSISTENT | BACKUP, INT, "1"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
+    {"DriverMonitorEarlyAlert", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"DriverMonitorEarlyAlertConfidence", {PERSISTENT | BACKUP, INT, "80"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},
     {"EnableGithubRunner", {PERSISTENT | BACKUP, BOOL}},
     {"GreenLightAlert", {PERSISTENT | BACKUP, BOOL, "0"}},
