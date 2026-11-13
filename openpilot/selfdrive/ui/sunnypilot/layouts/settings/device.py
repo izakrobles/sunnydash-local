@@ -72,13 +72,14 @@ class DeviceLayoutSP(DeviceLayout):
       param="DriverMonitorEarlyAlert",
       title=lambda: tr("Confidence-Based Early Alert"),
       description=lambda: tr("Chime as soon as you look away from the road when the driving model's confidence in the " +
-                             "scene drops below the threshold below. Above the threshold, stock driver monitoring timing applies. " +
-                             "This chime plays even when Quiet Mode is on."),
+                             "scene drops below the threshold below. At or above the threshold, chimes are delayed to " +
+                             "30, 45 and 60 seconds. This chime plays even when Quiet Mode is on."),
     )
     self._dm_early_alert_confidence = option_item_sp(
       param="DriverMonitorEarlyAlertConfidence",
       title=lambda: tr("Early Alert Below Confidence"),
-      description=lambda: tr("Scene confidence below which distraction chimes immediately instead of after 5 seconds."),
+      description=lambda: tr("Scene confidence below which distraction chimes immediately instead of after 5 seconds. " +
+                             "At or above it, chimes are delayed to 30, 45 and 60 seconds."),
       min_value=70,
       max_value=95,
       value_change_step=5,

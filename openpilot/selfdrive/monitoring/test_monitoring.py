@@ -316,10 +316,29 @@ class TestConfidenceEarlyAlert(OpenpilotTestCase):
     assert alert_lvls[int(DISTRACTED_SECONDS_TO_ORANGE / DT_DMON)] == AlertLevel.two
     assert alert_lvls[int(DISTRACTED_SECONDS_TO_RED / DT_DMON)] == AlertLevel.three
 
-  def test_confidence_above_threshold_keeps_stock_timing(self):
-    alert_lvls, _ = self._run_early_seq(always_distracted, 0.9, threshold=80)
+  def test_high_confidence_delays_first_alert(self):
+    s = dm_settings
+    alert_lvls, dm = self._run_early_seq(always_distracted, 0.9, threshold=80)
     assert alert_lvls[ONE_SECOND] == AlertLevel.none
-    assert alert_lvls[int(dm_settings._VISION_POLICY_ALERT_1_TIMEOUT / 2 / DT_DMON)] == AlertLevel.none
+    assert alert_lvls[int(s._VISION_POLICY_ALERT_1_TIMEOUT / 2 / DT_DMON)] == AlertLevel.none
+    assert alert_lvls[int((s._LENIENT_ALERT_1_TIMEOUT - 1) / DT_DMON)] == AlertLevel.none
+    assert alert_lvls[int((s._LENIENT_ALERT_1_TIMEOUT + 1) / DT_DMON)] == AlertLevel.one
+    assert not dm.early_alert_active
+
+  def test_high_confidence_escalates_from_lenient_timings(self):
+    s = dm_settings
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.9, threshold=80)
+    assert alert_lvls[int((s._LENIENT_ALERT_1_TIMEOUT + 1) / DT_DMON)] == AlertLevel.one
+    assert alert_lvls[int((s._LENIENT_ALERT_2_TIMEOUT - 1) / DT_DMON)] == AlertLevel.one
+    assert alert_lvls[int((s._LENIENT_ALERT_2_TIMEOUT + 1) / DT_DMON)] == AlertLevel.two
+    assert alert_lvls[int((s._LENIENT_ALERT_3_TIMEOUT - 1) / DT_DMON)] == AlertLevel.two
+    assert alert_lvls[int((s._LENIENT_ALERT_3_TIMEOUT + 1) / DT_DMON)] == AlertLevel.three
+
+  def test_confidence_at_threshold_is_lenient(self):
+    s = dm_settings
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.8, threshold=80)
+    assert alert_lvls[int(s._VISION_POLICY_ALERT_1_TIMEOUT / 2 / DT_DMON)] == AlertLevel.none
+    assert alert_lvls[int((s._LENIENT_ALERT_1_TIMEOUT + 1) / DT_DMON)] == AlertLevel.one
 
   def test_threshold_is_respected(self):
     # 85% confidence chimes early with a 90% threshold, but not with an 80% one

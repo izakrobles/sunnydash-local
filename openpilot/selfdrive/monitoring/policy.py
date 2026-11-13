@@ -88,13 +88,17 @@ class DRIVER_MONITOR_SETTINGS:
     self._WHEELPOS_DATA_VAR = 3*5.5e-5
     self._WHEELPOS_MAX_COUNT = -1
 
-    # sunnydash: confidence-based early alert. Only ever adds an earlier alert_1; never delays or removes stock alerts.
+    # sunnydash: confidence-based alert timing. Below the confidence threshold the stock alert_1 is
+    # pulled forward (early chime); at or above it, alerts are stretched to the lenient timeouts.
     self._EARLY_ALERT_CONFIDENCE_MIN = 0.70
     self._EARLY_ALERT_CONFIDENCE_MAX = 0.95
     self._EARLY_ALERT_CONFIDENCE_DEFAULT = 0.80
     self._SCENE_CONFIDENCE_FILTER_TS = 1.0  # smooth model confidence so the threshold doesn't flicker
     self._EARLY_ALERT_DISTRACTED_ON = 0.63  # same filter level stock treats as "certainly distracted"
     self._EARLY_ALERT_DISTRACTED_OFF = 0.37  # same filter level stock treats as "paying attention"
+    self._LENIENT_ALERT_1_TIMEOUT = 30.  # confident scene: first chime at 30s, orange at 45s, red at 60s
+    self._LENIENT_ALERT_2_TIMEOUT = 45.
+    self._LENIENT_ALERT_3_TIMEOUT = 60.
 
 class DriverPose:
   def __init__(self, settings):
@@ -217,15 +221,26 @@ class DriverMonitoring:
     if self.early_alert_active and self.alert_level == AlertLevel.none:
       self.alert_level = AlertLevel.one
 
+  def _vision_policy_timings(self):
+    s = self.settings
+    if not (self.early_alert_enabled and self.scene_confidence_filter.x >= self.early_alert_confidence):
+      return s._VISION_POLICY_ALERT_1_TIMEOUT, s._VISION_POLICY_ALERT_2_TIMEOUT, s._VISION_POLICY_ALERT_3_TIMEOUT
+
+    # confident scene: stretch the whole escalation, not just the first chime
+    return (s._LENIENT_ALERT_1_TIMEOUT,
+            s._LENIENT_ALERT_2_TIMEOUT,
+            s._LENIENT_ALERT_3_TIMEOUT)
+
   def _reset_awareness(self):
     self.awareness = 1.
     self.last_vision_awareness = 1.
     self.last_wheeltouch_awareness = 1.
 
   def _set_policy(self, target_policy):
+    vision_alert_1, vision_alert_2, vision_alert_3 = self._vision_policy_timings()
     if self.active_policy == MonitoringPolicy.vision and self.awareness <= self.threshold_alert_2:
       if target_policy == MonitoringPolicy.vision:
-        self.step_change = DT_DMON / self.settings._VISION_POLICY_ALERT_3_TIMEOUT
+        self.step_change = DT_DMON / vision_alert_3
       else:
         self.step_change = 0.
       return  # no exploit after orange alert
@@ -238,9 +253,9 @@ class DriverMonitoring:
         self.last_wheeltouch_awareness = self.awareness
         self.awareness = self.last_vision_awareness
 
-      self.threshold_alert_1 = 1. - self.settings._VISION_POLICY_ALERT_1_TIMEOUT / self.settings._VISION_POLICY_ALERT_3_TIMEOUT
-      self.threshold_alert_2 = 1. - self.settings._VISION_POLICY_ALERT_2_TIMEOUT / self.settings._VISION_POLICY_ALERT_3_TIMEOUT
-      self.step_change = DT_DMON / self.settings._VISION_POLICY_ALERT_3_TIMEOUT
+      self.threshold_alert_1 = 1. - vision_alert_1 / vision_alert_3
+      self.threshold_alert_2 = 1. - vision_alert_2 / vision_alert_3
+      self.step_change = DT_DMON / vision_alert_3
       self.active_policy = MonitoringPolicy.vision
     else:
       if self.active_policy == MonitoringPolicy.vision:
