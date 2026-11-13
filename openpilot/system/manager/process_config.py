@@ -12,7 +12,7 @@ from openpilot.common.hardware.hw import Paths
 from openpilot.sunnypilot.mapd.mapd_manager import MAPD_PATH
 
 from openpilot.sunnypilot.models.helpers import get_active_model_runner
-from openpilot.sunnypilot.private_dashcam.cloud_block import CLOUD_PROCESSES, cloud_blocked
+from openpilot.sunnypilot.private_dashcam.cloud_block import CLOUD_PROCESSES, COMMA_DATA_PROCESSES, cloud_blocked, comma_uploads_blocked
 from openpilot.sunnypilot.private_dashcam.uploader import should_run_private_dashcam_uploader
 from openpilot.sunnypilot.sunnylink.utils import sunnylink_need_register, sunnylink_ready, use_sunnylink_uploader
 
@@ -104,9 +104,6 @@ def mapd_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   return bool(os.path.exists(Paths.mapd_root()))
 
 def uploader_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
-  if params.get_bool("PrivateDashcamBlockCommaUploads"):
-    return False
-
   if not params.get_bool("OnroadUploads"):
     return only_offroad(started, params, CP)
 
@@ -215,10 +212,16 @@ if os.path.exists("../../third_party/copyparty/copyparty-sfx.py"):
 def not_cloud_blocked(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not cloud_blocked(params)
 
-# sunnydash: gate every comma/sunnylink process behind the cloud block
+def not_comma_uploads_blocked(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return not comma_uploads_blocked(params)
+
+# sunnydash: gate every comma/sunnylink process behind the cloud block,
+# and comma's data-sending processes behind the comma uploads block as well
 for _p in procs:
   if _p.name in CLOUD_PROCESSES:
     _p.should_run = and_(not_cloud_blocked, _p.should_run)
+  if _p.name in COMMA_DATA_PROCESSES:
+    _p.should_run = and_(not_comma_uploads_blocked, _p.should_run)
     if isinstance(_p, DaemonProcess):
       _p.kill_when_not_running = True
 

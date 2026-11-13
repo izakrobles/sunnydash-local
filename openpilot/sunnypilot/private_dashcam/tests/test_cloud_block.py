@@ -1,7 +1,8 @@
 import pytest
 
 from openpilot.sunnypilot.private_dashcam import cloud_block
-from openpilot.sunnypilot.private_dashcam.cloud_block import CLOUD_BLOCK_PARAM, CLOUD_PROCESSES, CloudBlockedError, cloud_blocked
+from openpilot.sunnypilot.private_dashcam.cloud_block import (CLOUD_BLOCK_PARAM, CLOUD_PROCESSES, COMMA_DATA_PROCESSES, COMMA_UPLOADS_BLOCK_PARAM,
+                                                               CloudBlockedError, cloud_blocked, comma_uploads_blocked)
 
 
 class FakeParams:
@@ -22,6 +23,27 @@ def test_cloud_blocked_reads_param():
 
 def test_cloud_blocked_fails_closed():
   assert cloud_blocked(FakeParams(raise_on_get=True))
+
+
+def test_comma_uploads_blocked_reads_param_and_fails_closed():
+  assert comma_uploads_blocked(FakeParams({COMMA_UPLOADS_BLOCK_PARAM: True}))
+  assert not comma_uploads_blocked(FakeParams({COMMA_UPLOADS_BLOCK_PARAM: False}))
+  assert comma_uploads_blocked(FakeParams(raise_on_get=True))
+
+
+def test_comma_data_processes():
+  assert COMMA_DATA_PROCESSES == {"manage_athenad", "uploader"}
+  assert COMMA_DATA_PROCESSES <= CLOUD_PROCESSES
+
+
+def test_blocks_default_on():
+  import os
+  header = os.path.join(os.path.dirname(__file__), "..", "..", "..", "common", "params_keys.h")
+  with open(header) as f:
+    text = f.read()
+  for key in (CLOUD_BLOCK_PARAM, COMMA_UPLOADS_BLOCK_PARAM):
+    line = next(l for l in text.splitlines() if f'"{key}"' in l)
+    assert line.rstrip().endswith('BOOL, "1"}},'), line
 
 
 def test_blocked_error_is_handled_like_a_network_failure():

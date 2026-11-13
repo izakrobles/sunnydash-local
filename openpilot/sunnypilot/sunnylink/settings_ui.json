@@ -1750,15 +1750,10 @@
               "key": "PrivateDashcamBlockCommaUploads",
               "widget": "toggle",
               "title": "Block comma Uploads",
-              "description": "Stops the stock comma uploader from sending route files to comma servers. Enable only after private uploads are configured and working.",
+              "description": "Stops the comma uploader and comma remote access (athenad), so route files, camera snapshots and location never reach comma servers, even if the cloud block above is turned off. On by default.",
               "enablement": [
                 {
                   "type": "offroad_only"
-                },
-                {
-                  "type": "param",
-                  "key": "PrivateDashcamEnabled",
-                  "equals": true
                 }
               ]
             },
