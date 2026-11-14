@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>sunnypilot settings</title>
+<style>
+  :root {
+    --bg: #0b0b0d; --card: #17171b; --card2: #1f1f25; --line: #2a2a31;
+    --text: #f2f2f4; --muted: #9a9aa5; --accent: #33d17a; --accent-ink: #062b15;
+    --warn: #ff8a00; --danger: #ff5c5c; --radius: 14px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  header { position: sticky; top: 0; z-index: 5; background: rgba(11,11,13,.92);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
+    padding: calc(10px + env(safe-area-inset-top)) 16px 0; }
+  h1 { font-size: 20px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: none; }
+  .dot.onroad { background: var(--warn); }
+  #status { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: auto; }
+  nav { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; scrollbar-width: none; }
+  nav::-webkit-scrollbar { display: none; }
+  nav button { flex: none; border: 1px solid var(--line); background: var(--card); color: var(--text);
+    padding: 8px 14px; border-radius: 999px; font: inherit; font-size: 15px; }
+  nav button.active { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+  main { padding: 12px 16px; max-width: 720px; margin: 0 auto; }
+  .banner { background: #2b1d0a; border: 1px solid #5a3a10; color: #ffc27a; border-radius: var(--radius);
+    padding: 10px 12px; font-size: 14px; margin-bottom: 12px; }
+  section { margin-bottom: 18px; }
+  section > h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+    margin: 18px 4px 6px; font-weight: 600; }
+  section > p.sdesc { margin: -2px 4px 8px; color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border-radius: var(--radius); overflow: hidden; }
+  .row { padding: 12px 14px; border-top: 1px solid var(--line); }
+  .row:first-child { border-top: 0; }
+  .row.sub { padding-left: 30px; background: var(--card2); }
+  .row.disabled .title, .row.disabled .control { opacity: .45; }
+  .line { display: flex; align-items: center; gap: 12px; }
+  .title { flex: 1; font-weight: 500; }
+  .desc { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .reason { color: var(--warn); font-size: 13px; margin-top: 4px; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  details { margin-top: 4px; color: var(--muted); font-size: 13px; }
+  summary { cursor: pointer; color: var(--text); opacity: .8; }
+  .group { padding: 10px 14px 6px; color: var(--muted); font-size: 13px; font-weight: 600;
+    border-top: 1px solid var(--line); background: var(--card2); }
+  /* toggle */
+  .switch { position: relative; width: 52px; height: 32px; flex: none; }
+  .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .switch span { position: absolute; inset: 0; border-radius: 999px; background: #3a3a42; transition: .15s; }
+  .switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px;
+    border-radius: 50%; background: #fff; transition: .15s; }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { transform: translateX(20px); }
+  /* segmented */
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .seg button { flex: 1 1 auto; min-width: 64px; border: 1px solid var(--line); background: var(--card2);
+    color: var(--text); padding: 9px 10px; border-radius: 10px; font: inherit; font-size: 14px; }
+  .seg button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .seg button:disabled { opacity: .35; }
+  /* stepper / select */
+  .stepper { display: flex; align-items: center; gap: 8px; flex: none; }
+  .stepper button { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--card2); color: var(--text); font-size: 22px; line-height: 1; }
+  .stepper .val { min-width: 74px; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+  select { background: var(--card2); color: var(--text); border: 1px solid var(--line); border-radius: 10px;
+    padding: 9px 10px; font: inherit; font-size: 15px; max-width: 55%; }
+  button:disabled, select:disabled, input:disabled { cursor: not-allowed; }
+  .info-val { color: var(--muted); }
+  /* pin */
+  .pin { max-width: 340px; margin: 18vh auto 0; text-align: center; padding: 0 16px; }
+  .pin input { width: 100%; font-size: 32px; letter-spacing: .4em; text-align: center; padding: 12px;
+    border-radius: var(--radius); border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  .pin button { margin-top: 12px; width: 100%; padding: 14px; border-radius: var(--radius); border: 0;
+    background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 700; }
+  .pin p { color: var(--muted); }
+  #toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    background: #2a2a31; color: var(--text); padding: 10px 16px; border-radius: 999px; font-size: 14px;
+    opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; text-align: center; }
+  #toast.show { opacity: 1; }
+  #toast.err { background: #4a1414; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+"use strict";
+const PIN_KEY = "sunnydash-settings-pin";
+let pin = null, schema = null, state = null, tab = null, busy = new Set(), pollTimer = null;
+
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (k === "checked" || k === "disabled" || k === "selected") n[k] = !!v;
+    else n.setAttribute(k, v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false)
+    n.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return n;
+}
+
+let toastTimer;
+function toast(msg, err) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.className = "show" + (err ? " err" : "");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = "", 2200);
+}
+
+async function api(path, body) {
+  const opts = { headers: { "X-Pin": pin }, cache: "no-store" };
+  if (body !== undefined) {
+    opts.method = "POST"; opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(path, opts);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (r.status === 401 || r.status === 429) { forgetPin(data.error || "Wrong PIN"); throw new Error("auth"); }
+  if (!r.ok) { const e = new Error(data.error || "Something went wrong"); e.state = data.state; throw e; }
+  return data;
+}
+
+function forgetPin(msg) {
+  try { sessionStorage.removeItem(PIN_KEY); } catch (e) {}
+  pin = null; clearInterval(pollTimer); showPin(msg);
+}
+
+function showPin(msg) {
+  const input = el("input", { inputmode: "numeric", autocomplete: "one-time-code", maxlength: "6",
+    placeholder: "••••••", "aria-label": "PIN" });
+  const go = () => { const v = input.value.trim(); if (/^\d{6}$/.test(v)) start(v); else toast("Enter the 6-digit PIN", true); };
+  input.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+  const app = document.getElementById("app");
+  app.replaceChildren(el("div", { class: "pin" },
+    el("h1", { style: "justify-content:center" }, "sunnypilot settings"),
+    el("p", {}, "Enter the PIN shown on the device under Settings → phone settings."),
+    msg ? el("p", { style: "color:var(--danger)" }, msg) : null,
+    input, el("button", { onclick: go }, "Unlock")));
+  input.focus();
+}
+
+async function start(p) {
+  pin = p;
+  try {
+    schema = await api("/api/schema");
+    state = await api("/api/state");
+  } catch (e) { if (e.message !== "auth") toast(e.message, true); return; }
+  try { sessionStorage.setItem(PIN_KEY, pin); } catch (e) {}
+  const panels = tabs();
+  if (!tab || !panels.some(t => t.id === tab)) tab = panels[0].id;
+  render();
+  clearInterval(pollTimer);
+  pollTimer = setInterval(refresh, 4000);
+}
+
+async function refresh() {
+  if (document.hidden || busy.size) return;
+  try {
+    const next = await api("/api/state");
+    // only redraw when something changed, and never under an open picker (it would close it)
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (JSON.stringify(next) === JSON.stringify(state) || tag === "SELECT") return;
+    state = next; render();
+  } catch (e) {}
+}
+
+function tabs() {
+  const list = [...schema.panels].sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+  if (schema.vehicle) list.push({ id: "__vehicle", label: "Vehicle",
+    sections: [{ id: "vehicle", title: schema.vehicle.title, description: schema.vehicle.description, items: schema.vehicle.items }] });
+  return list;
+}
+
+function unitText(unit) {
+  if (!unit) return "";
+  if (typeof unit === "object") return state.is_metric ? unit.metric : unit.imperial;
+  return unit;
+}
+
+function fmt(v, step) {
+  const d = step && step < 1 ? Math.min(3, Math.ceil(-Math.log10(step))) : 0;
+  return Number(v).toFixed(d);
+}
+
+function titleFor(item) {
+  let t = item.title || item.key;
+  const s = item.title_param_suffix;
+  if (s && s.param) {
+    const v = state.values[s.param];
+    const key = typeof v === "boolean" ? (v ? "1" : "0") : String(v);
+    if (s.values && s.values[key]) t += " (" + s.values[key] + ")";
+  }
+  return t;
+}
+
+async function save(key, value) {
+  busy.add(key); render();
+  try {
+    const r = await api("/api/set", { key, value });
+    state = r.state; toast("Saved");
+  } catch (e) {
+    if (e.message === "auth") return;
+    if (e.state) state = e.state;
+    toast(e.message, true);
+  } finally { busy.delete(key); render(); }
+}
+
+function control(item, st, locked) {
+  const v = state.values[item.key];
+  const dis = locked || busy.has(item.key);
+  if (item.widget === "toggle") {
+    return el("label", { class: "switch control" },
+      el("input", { type: "checkbox", role: "switch", checked: !!v, disabled: dis, "aria-label": item.title,
+        onchange: e => save(item.key, e.target.checked) }), el("span"));
+  }
+  if (item.widget === "info") return el("span", { class: "info-val control" }, v === "" || v == null ? "—" : String(v));
+  if (item.options && item.options.length && item.widget === "option") {
+    const sel = el("select", { class: "control", disabled: dis, "aria-label": item.title,
+      onchange: e => save(item.key, item.options[Number(e.target.value)].value) });
+    item.options.forEach((o, i) => sel.append(el("option", { value: String(i), selected: sameVal(o.value, v),
+      disabled: st.options && st.options[i] === false }, o.label)));
+    return sel;
+  }
+  if ("min" in item && "max" in item) {
+    const step = item.step || 1, unit = unitText(item.unit);
+    const cur = typeof v === "number" ? v : item.min;
+    const clamp = x => Math.min(item.max, Math.max(item.min, Math.round((x - item.min) / step) * step + item.min));
+    return el("div", { class: "stepper control" },
+      el("button", { "aria-label": "Decrease", disabled: dis || cur <= item.min, onclick: () => save(item.key, Number(fmt(clamp(cur - step), step))) }, "−"),
+      el("span", { class: "val" }, fmt(cur, step) + (unit ? " " + unit : "")),
+      el("button", { "aria-label": "Increase", disabled: dis || cur >= item.max, onclick: () => save(item.key, Number(fmt(clamp(cur + step), step))) }, "+"));
+  }
+  return null;
+}
+
+function sameVal(a, b) {
+  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) < 1e-6;
+  if (typeof a === "number" && typeof b === "boolean") return a === (b ? 1 : 0);
+  return a === b;
+}
+
+function row(item, sub) {
+  const st = state.status[item.key] || { enabled: false, reason: "Unavailable" };
+  const locked = !st.enabled;
+  const r = el("div", { class: "row" + (sub ? " sub" : "") + (locked ? " disabled" : "") });
+  const isSeg = item.widget === "multiple_button" && item.options;
+  r.append(el("div", { class: "line" }, el("div", { class: "title" }, titleFor(item)), isSeg ? null : control(item, st, locked)));
+  if (isSeg) {
+    const v = state.values[item.key];
+    r.append(el("div", { class: "seg control" }, item.options.map((o, i) =>
+      el("button", { class: sameVal(o.value, v) ? "on" : "", "aria-pressed": sameVal(o.value, v) ? "true" : "false",
+        disabled: locked || busy.has(item.key) || (st.options && st.options[i] === false),
+        onclick: () => { if (!sameVal(o.value, v)) save(item.key, o.value); } }, o.label))));
+  }
+  if (locked && st.reason) r.append(el("div", { class: "reason" }, st.reason));
+  if (item.description) r.append(el("div", { class: "desc" }, item.description));
+  if (item.details) r.append(el("details", {}, el("summary", {}, "More info"), item.details));
+  if (item.needs_onroad_cycle) r.append(el("div", { class: "note" }, "Takes effect on the next drive"));
+  const out = [r];
+  for (const s of item.sub_items || []) out.push(...row(s, true));
+  return out;
+}
+
+function render() {
+  if (!schema || !state) return;
+  const scrollY = window.scrollY;
+  const panels = tabs();
+  const panel = panels.find(p => p.id === tab) || panels[0];
+  const nav = el("nav", { "aria-label": "Settings pages" }, panels.map(p =>
+    el("button", { class: p.id === panel.id ? "active" : "", onclick: () => { tab = p.id; render(); window.scrollTo(0, 0); } }, p.label)));
+  const header = el("header", {}, el("h1", {}, el("span", { class: "dot" + (state.onroad ? " onroad" : "") }), "sunnypilot",
+    el("span", { id: "status" }, state.onroad ? (state.engaged ? "Driving · engaged" : "Driving") : "Parked")), nav);
+  const main = el("main");
+  if (state.onroad) main.append(el("div", { class: "banner" }, "The car is on. Settings marked “park the car” unlock once it's off."));
+  if (panel.description) main.append(el("p", { class: "desc", style: "margin:0 4px" }, panel.description));
+  for (const s of panel.sections) {
+    const card = el("div", { class: "card" });
+    for (const it of s.items || []) card.append(...row(it, false));
+    for (const sp of s.sub_panels || []) {
+      card.append(el("div", { class: "group" }, sp.label));
+      for (const it of sp.items || []) card.append(...row(it, true));
+    }
+    if (!card.childNodes.length) continue;
+    main.append(el("section", {}, s.title ? el("h2", {}, s.title) : null,
+      s.description ? el("p", { class: "sdesc" }, s.description) : null, card));
+  }
+  document.getElementById("app").replaceChildren(header, main);
+  window.scrollTo(0, scrollY);
+}
+
+document.addEventListener("visibilitychange", () => { if (!document.hidden && pin) refresh(); });
+
+function boot() {
+  const m = location.hash.match(/pin=(\d{6})/);
+  if (m) history.replaceState(null, "", location.pathname);
+  let saved = null;
+  try { saved = sessionStorage.getItem(PIN_KEY); } catch (e) {}
+  const p = m ? m[1] : saved;
+  if (p) start(p); else showPin();
+}
+window.addEventListener("hashchange", () => { if (/pin=\d{6}/.test(location.hash)) boot(); });
+boot();
+</script>
+</body>
+</html>

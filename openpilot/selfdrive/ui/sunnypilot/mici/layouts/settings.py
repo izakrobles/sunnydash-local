@@ -11,6 +11,7 @@ from openpilot.selfdrive.ui.mici.widgets.button import BigCircleButton
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog, BigDialog
 from openpilot.selfdrive.ui.sunnypilot.mici.layouts.sunnylink import SunnylinkLayoutMici
 from openpilot.selfdrive.ui.sunnypilot.mici.layouts.models import ModelsLayoutMici
+from openpilot.selfdrive.ui.sunnypilot.mici.layouts.phone_settings import PhoneSettingsLayoutMici
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.multilang import tr
@@ -46,6 +47,10 @@ class SettingsLayoutSP(OP.SettingsLayout):
     sunnylink_btn = SunnylinkBigButton(tr("sunnylink"), "", gui_app.texture("../../sunnypilot/selfdrive/assets/icons_mici/sunnylink.png", 76, 44))
     sunnylink_btn.set_click_callback(lambda: gui_app.push_widget(sunnylink_panel))
 
+    phone_panel = PhoneSettingsLayoutMici()
+    phone_btn = SettingsBigButton(tr("phone settings"), "", gui_app.texture("icons_mici/settings/network/tethering.png", ICON_SIZE, ICON_SIZE))
+    phone_btn.set_click_callback(lambda: gui_app.push_widget(phone_panel))
+
     models_panel = ModelsLayoutMici()
     models_btn = SettingsBigButton(tr("models"), "", gui_app.texture("../../sunnypilot/selfdrive/assets/offroad/icon_models.png", ICON_SIZE, ICON_SIZE))
     models_btn.set_click_callback(lambda: gui_app.push_widget(models_panel))
@@ -68,6 +73,7 @@ class SettingsLayoutSP(OP.SettingsLayout):
 
     items.insert(1, models_btn)
     items.insert(5, sunnylink_btn)
+    items.insert(6, phone_btn)
 
     # front slots (only one ever visible at a time): exit-always-offroad, then enable-onroad
     items.insert(0, self._enable_offroad_btn_onroad)

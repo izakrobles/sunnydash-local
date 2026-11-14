@@ -100,6 +100,9 @@ def is_stock_model(started, params, CP: car.CarParams) -> bool:
   """Check if the active model runner is stock."""
   return bool(get_active_model_runner(params, not started) == custom.ModelManagerSP.Runner.stock)
 
+def local_settings_enabled(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return params.get_bool("LocalSettingsEnabled")
+
 def mapd_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   return bool(os.path.exists(Paths.mapd_root()))
 
@@ -164,6 +167,7 @@ procs = [
   PythonProcess("updated", "openpilot.system.updated.updated", only_offroad, enabled=not PC),
   PythonProcess("uploader", "openpilot.system.loggerd.uploader", uploader_ready),
   PythonProcess("private_dashcam_uploader", "openpilot.sunnypilot.private_dashcam.uploader", private_dashcam_uploader_ready_shim),
+  PythonProcess("local_settings", "openpilot.sunnypilot.local_settings.server", local_settings_enabled),
   PythonProcess("statsd", "openpilot.sunnypilot.system.statsd", always_run),
 
   # debug procs
