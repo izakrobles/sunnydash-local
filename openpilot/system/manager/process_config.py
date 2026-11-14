@@ -43,6 +43,11 @@ def ublox(started: bool, params: Params, CP: car.CarParams) -> bool:
 def joystick(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started and params.get_bool("JoystickDebugMode")
 
+def joystick_reader(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # sunnydash: read the gamepad whenever joystick mode is on, parked too, so its input can be checked from the phone
+  # page before driving. This only publishes testJoystick; joystickd (onroad only) is what turns it into car commands.
+  return params.get_bool("JoystickDebugMode") and not (started and CP.notCar)
+
 def not_joystick(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started and not params.get_bool("JoystickDebugMode")
 
@@ -173,7 +178,7 @@ procs = [
   # debug procs
   NativeProcess("bridge", "openpilot/cereal/messaging", ["./bridge"], notcar),
   PythonProcess("webrtcd", "openpilot.system.webrtc.webrtcd", or_(livestream, notcar)),
-  PythonProcess("joystick", "openpilot.tools.joystick.joystick_control", and_(joystick, iscar)),
+  PythonProcess("joystick", "openpilot.tools.joystick.joystick_control", joystick_reader),
 
   # sunnylink <3
   DaemonProcess("manage_sunnylinkd", "openpilot.sunnypilot.sunnylink.athena.manage_sunnylinkd", "SunnylinkdPid"),

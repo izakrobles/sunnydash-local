@@ -364,9 +364,9 @@ function paintController() {
   status.className = "ctl-status" + (c.live ? " live" : "");
   document.getElementById("ctl-status-text").textContent = c.live ? `Receiving · ${c.rate_hz} Hz` : "No controller input";
   document.getElementById("ctl-hint").textContent = c.live ? "" :
-    !c.joystick_mode ? "Joystick mode is off. Start joystick_control on the comma; it turns joystick mode on." :
-    c.age === null ? "Joystick mode is on, but nothing has arrived yet. Is the controller connected?" :
-    `Last input ${c.age < 60 ? c.age.toFixed(1) + " s" : Math.round(c.age / 60) + " min"} ago. Is the controller still connected?`;
+    !c.joystick_mode ? "Joystick Debug Mode is off. Turn it on below, with the car parked, and the comma starts reading the controller." :
+    c.age === null ? "Joystick Debug Mode is on, but the comma doesn't see a controller. Check that the dongle is plugged in and the controller is switched on." :
+    `Last input ${c.age < 60 ? c.age.toFixed(1) + " s" : Math.round(c.age / 60) + " min"} ago. Is the controller still switched on?`;
 
   // positive steer axis is a left turn
   const steer = c.steer, pct = Math.round(Math.abs(steer) * 100);
@@ -378,8 +378,10 @@ function paintController() {
   setFill("ctl-accel-fill", a / 4, a >= 0 ? "gas" : "brake");
 
   document.getElementById("ctl-raw").textContent = c.axes.length ? "axes [" + c.axes.map(v => v.toFixed(3)).join(", ") + "]" : "no axes";
+  // the Xbox mapping sends [RB, B]; anything else is shown by position
+  const names = c.buttons.length === 2 ? ["RB · throttle armed", "B · cancel"] : [];
   document.getElementById("ctl-buttons").replaceChildren(...c.buttons.map((on, i) =>
-    el("span", { class: "chip" + (on ? " on" : "") }, `button ${i + 1}`)));
+    el("span", { class: "chip" + (on ? " on" : "") }, names[i] || `button ${i + 1}`)));
 }
 
 async function pollController() {
