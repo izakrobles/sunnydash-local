@@ -22,7 +22,7 @@
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: none; }
   .dot.onroad { background: var(--warn); }
   #status { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: auto; }
-  nav { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; scrollbar-width: none; }
+  nav { position: relative; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; scrollbar-width: none; }
   nav::-webkit-scrollbar { display: none; }
   nav button { flex: none; border: 1px solid var(--line); background: var(--card); color: var(--text);
     padding: 8px 14px; border-radius: 999px; font: inherit; font-size: 15px; }
@@ -83,6 +83,21 @@
     opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; text-align: center; }
   #toast.show { opacity: 1; }
   #toast.err { background: #4a1414; }
+  /* controller */
+  .ctl-status { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .ctl-status .dot { background: #55555f; }
+  .ctl-status.live .dot { background: var(--accent); }
+  .meter { position: relative; height: 18px; border-radius: 9px; background: var(--card2); margin-top: 10px; overflow: hidden; }
+  .meter::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--line); }
+  .meter .fill { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; background: var(--text); }
+  .meter .fill.gas { background: var(--accent); }
+  .meter .fill.brake { background: var(--danger); }
+  .meter-ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .ctl-val { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip { padding: 4px 10px; border-radius: 999px; background: var(--card2); color: var(--muted); font-size: 13px; }
+  .chip.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -92,6 +107,8 @@
 "use strict";
 const PIN_KEY = "sunnydash-settings-pin";
 let pin = null, schema = null, state = null, tab = null, busy = new Set(), pollTimer = null;
+const CONTROLLER_TAB = "__controller", CONTROLLER_SECTION = "controller";
+let controller = null, controllerRunning = false;
 
 function el(tag, attrs, ...children) {
   const n = document.createElement(tag);
@@ -172,9 +189,13 @@ async function refresh() {
 }
 
 function tabs() {
-  const list = [...schema.panels].sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+  // the schema's controller section (joystick mode + pedal tuning) lives on the Controller tab, next to the live view
+  const ctlSections = schema.panels.flatMap(p => (p.sections || []).filter(s => s.id === CONTROLLER_SECTION));
+  const list = [...schema.panels].sort((a, b) => (a.order ?? 99) - (b.order ?? 99))
+    .map(p => ({ ...p, sections: (p.sections || []).filter(s => s.id !== CONTROLLER_SECTION) }));
   if (schema.vehicle) list.push({ id: "__vehicle", label: "Vehicle",
     sections: [{ id: "vehicle", title: schema.vehicle.title, description: schema.vehicle.description, items: schema.vehicle.items }] });
+  list.push({ id: CONTROLLER_TAB, label: "Controller", sections: ctlSections });
   return list;
 }
 
@@ -271,14 +292,17 @@ function row(item, sub) {
 function render() {
   if (!schema || !state) return;
   const scrollY = window.scrollY;
+  const oldNav = document.querySelector("header nav");
+  const navScroll = oldNav ? oldNav.scrollLeft : 0;
   const panels = tabs();
   const panel = panels.find(p => p.id === tab) || panels[0];
   const nav = el("nav", { "aria-label": "Settings pages" }, panels.map(p =>
-    el("button", { class: p.id === panel.id ? "active" : "", onclick: () => { tab = p.id; render(); window.scrollTo(0, 0); } }, p.label)));
+    el("button", { class: p.id === panel.id ? "active" : "", onclick: () => { tab = p.id; render(); window.scrollTo(0, 0); showActiveTab(); } }, p.label)));
   const header = el("header", {}, el("h1", {}, el("span", { class: "dot" + (state.onroad ? " onroad" : "") }), "sunnypilot",
     el("span", { id: "status" }, state.onroad ? (state.engaged ? "Driving · engaged" : "Driving") : "Parked")), nav);
   const main = el("main");
   if (state.onroad) main.append(el("div", { class: "banner" }, "The car is on. Settings marked “park the car” unlock once it's off."));
+  if (panel.id === CONTROLLER_TAB) main.append(controllerView());
   if (panel.description) main.append(el("p", { class: "desc", style: "margin:0 4px" }, panel.description));
   for (const s of panel.sections) {
     const card = el("div", { class: "card" });
@@ -292,7 +316,90 @@ function render() {
       s.description ? el("p", { class: "sdesc" }, s.description) : null, card));
   }
   document.getElementById("app").replaceChildren(header, main);
+  nav.scrollLeft = navScroll;  // keep the tab row where it was instead of snapping back to the first tab
   window.scrollTo(0, scrollY);
+  if (panel.id === CONTROLLER_TAB) { paintController(); pollController(); }
+}
+
+/* ---- Controller tab: live view of what joystickd receives (polled ~10x a second while the tab is open) ---- */
+function meter(id, left, right) {
+  return [el("div", { class: "meter" }, el("div", { class: "fill", id })),
+          el("div", { class: "meter-ends" }, el("span", {}, left), el("span", {}, right))];
+}
+
+function controllerView() {
+  return el("section", {}, el("h2", {}, "Live input"),
+    el("div", { class: "card" },
+      el("div", { class: "row" },
+        el("div", { class: "ctl-status", id: "ctl-status" }, el("span", { class: "dot" }), el("span", { id: "ctl-status-text" }, "Connecting…")),
+        el("div", { class: "desc", id: "ctl-hint" })),
+      el("div", { class: "row" },
+        el("div", { class: "line" }, el("span", { class: "title" }, "Steering"), el("span", { class: "ctl-val", id: "ctl-steer" }, "–")),
+        ...meter("ctl-steer-fill", "left", "right")),
+      el("div", { class: "row" },
+        el("div", { class: "line" }, el("span", { class: "title" }, "Gas / brake"), el("span", { class: "ctl-val", id: "ctl-accel" }, "–")),
+        ...meter("ctl-accel-fill", "brake", "gas"),
+        el("div", { class: "note" }, "What joystickd asks the car for. The car may clip it to its own limits.")),
+      el("div", { class: "row" },
+        el("div", { class: "title" }, "Raw input"),
+        el("div", { class: "mono", id: "ctl-raw" }, "–"),
+        el("div", { class: "chips", id: "ctl-buttons" }))),
+    el("p", { class: "sdesc", style: "margin:8px 4px" },
+      "Shows the controller input the comma is receiving right now. Input older than 0.2 s is ignored by the car, so it reads as centered."));
+}
+
+function setFill(id, v, cls) {
+  const f = document.getElementById(id);
+  if (!f) return;
+  const x = Math.max(-1, Math.min(1, v)) * 50;
+  f.style.left = (x >= 0 ? 50 : 50 + x) + "%";
+  f.style.width = Math.abs(x) + "%";
+  f.className = "fill" + (cls ? " " + cls : "");
+}
+
+function paintController() {
+  const c = controller;
+  const status = document.getElementById("ctl-status");
+  if (!status || !c) return;
+  status.className = "ctl-status" + (c.live ? " live" : "");
+  document.getElementById("ctl-status-text").textContent = c.live ? `Receiving · ${c.rate_hz} Hz` : "No controller input";
+  document.getElementById("ctl-hint").textContent = c.live ? "" :
+    !c.joystick_mode ? "Joystick mode is off. Start joystick_control on the comma; it turns joystick mode on." :
+    c.age === null ? "Joystick mode is on, but nothing has arrived yet. Is the controller connected?" :
+    `Last input ${c.age < 60 ? c.age.toFixed(1) + " s" : Math.round(c.age / 60) + " min"} ago. Is the controller still connected?`;
+
+  // positive steer axis is a left turn
+  const steer = c.steer, pct = Math.round(Math.abs(steer) * 100);
+  document.getElementById("ctl-steer").textContent = pct === 0 ? "centered" : `${pct}% ${steer > 0 ? "left" : "right"}`;
+  setFill("ctl-steer-fill", -steer);
+
+  const a = c.accel_ms2;
+  document.getElementById("ctl-accel").textContent = a === 0 ? "none" : `${a > 0 ? "gas" : "brake"} ${Math.abs(a).toFixed(2)} m/s²`;
+  setFill("ctl-accel-fill", a / 4, a >= 0 ? "gas" : "brake");
+
+  document.getElementById("ctl-raw").textContent = c.axes.length ? "axes [" + c.axes.map(v => v.toFixed(3)).join(", ") + "]" : "no axes";
+  document.getElementById("ctl-buttons").replaceChildren(...c.buttons.map((on, i) =>
+    el("span", { class: "chip" + (on ? " on" : "") }, `button ${i + 1}`)));
+}
+
+async function pollController() {
+  if (controllerRunning) return;  // one loop at a time, even if render() runs again mid-request
+  controllerRunning = true;
+  try {
+    while (tab === CONTROLLER_TAB && pin) {
+      if (!document.hidden) {
+        try { controller = await api("/api/controller"); paintController(); } catch (e) { if (e.message === "auth") break; }
+      }
+      await new Promise(r => setTimeout(r, 100));
+    }
+  } finally { controllerRunning = false; }
+}
+
+function showActiveTab() {
+  const nav = document.querySelector("header nav"), b = nav && nav.querySelector(".active");
+  if (!b) return;
+  if (b.offsetLeft < nav.scrollLeft) nav.scrollLeft = b.offsetLeft - 8;
+  else if (b.offsetLeft + b.offsetWidth > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = b.offsetLeft + b.offsetWidth - nav.clientWidth + 8;
 }
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden && pin) refresh(); });

@@ -9,7 +9,7 @@ import math
 import os
 from dataclasses import dataclass, field
 
-from openpilot.common.params import ParamKeyType
+from openpilot.common.params import ParamKeyType, UnknownKeyName
 
 SETTINGS_UI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sunnylink", "settings_ui.json")
 
@@ -195,6 +195,15 @@ class Settings:
     self.params = params
     self.schema = schema if schema is not None else load_schema()
     self.entries, self.titles = index_schema(self.schema)
+    # A schema item whose param this build doesn't know (e.g. the schema got ahead of a rebuild) shows as unavailable
+    # instead of breaking the whole page
+    self.unknown: set[str] = set()
+    for key, entry in self.entries.items():
+      try:
+        params.check_key(key)
+      except UnknownKeyName:
+        self.unknown.add(key)
+        entry.read_only_reason = REASON_UNAVAILABLE
 
   def page_schema(self, caps: dict) -> dict:
     """The schema the page renders: all panels, plus only this car's brand settings."""
@@ -203,7 +212,7 @@ class Settings:
     return {"panels": self.schema.get("panels", []), "vehicle": vehicle, "brand": brand}
 
   def context(self, caps: dict, onroad: bool, engaged: bool) -> Context:
-    values = {key: read_value(self.params, key, e.item) for key, e in self.entries.items()}
+    values = {key: None if key in self.unknown else read_value(self.params, key, e.item) for key, e in self.entries.items()}
     return Context(values, caps, onroad, engaged)
 
   def status(self, entry: Entry, ctx: Context) -> tuple[bool, str | None]:

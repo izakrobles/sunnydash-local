@@ -23,9 +23,26 @@ sections:
     widget: toggle
     blocked: true
     title: Enable SSH
+  - key: NavigationEnabled
+    widget: toggle
+    title: Navigation (Alpha)
+    description: Turn-by-turn navigation with a route map. Set a destination from comma connect.
+    visibility:
+    - {type: capability, field: device_type, equals: mici}
+    - $ref: '#/macros/release_branches_hide'
+  - key: ShowDebugInfo
+    widget: toggle
+    title: UI Debug Mode
+- id: controller
+  title: Controller Driving
+  description: Gamepad control for closed-course testing. Values here are read by a running joystick_control.py within a
+    second, so the pedals can be tuned from a phone with the car parked.
+  items:
   - key: JoystickDebugMode
     widget: toggle
     title: Joystick Debug Mode
+    description: Replaces normal driving with raw gamepad axes. No driver monitoring and no sunnypilot AEB while this is on.
+      Requires joystick_control.py to be running.
     enablement:
     - $ref: '#/macros/offroad'
   - key: AlphaLongitudinalEnabled
@@ -49,16 +66,47 @@ sections:
           equals: true
     enablement:
     - $ref: '#/macros/not_engaged'
-  - key: NavigationEnabled
-    widget: toggle
-    title: Navigation (Alpha)
-    description: Turn-by-turn navigation with a route map. Set a destination from comma connect.
-    visibility:
-    - {type: capability, field: device_type, equals: mici}
-    - $ref: '#/macros/release_branches_hide'
-  - key: ShowDebugInfo
-    widget: toggle
-    title: UI Debug Mode
+  - key: JoystickGasMax
+    widget: option
+    title: Gas Ceiling
+    description: Acceleration asked for by a fully pressed right trigger. The car clamps at its own limit (2.0 m/s² on
+      MQB VW).
+    min: 0.0
+    max: 4.0
+    step: 0.1
+    unit: m/s²
+    enablement:
+    - $ref: '#/macros/offroad'
+  - key: JoystickGasCurve
+    widget: option
+    title: Gas Curve
+    description: Exponent on the right trigger. 1.0 is linear, higher is gentler early in the travel and packs the resolution
+      into the top end.
+    min: 0.5
+    max: 3.0
+    step: 0.1
+    enablement:
+    - $ref: '#/macros/offroad'
+  - key: JoystickBrakeMax
+    widget: option
+    title: Brake Ceiling
+    description: Deceleration asked for by a fully pressed left trigger. The car clamps at its own limit (3.5 m/s² on MQB
+      VW).
+    min: 0.0
+    max: 4.0
+    step: 0.1
+    unit: m/s²
+    enablement:
+    - $ref: '#/macros/offroad'
+  - key: JoystickBrakeCurve
+    widget: option
+    title: Brake Curve
+    description: Exponent on the left trigger. 1.0 is linear, higher is gentler early in the travel.
+    min: 0.5
+    max: 3.0
+    step: 0.1
+    enablement:
+    - $ref: '#/macros/offroad'
 - id: test_maneuvers
   title: Test Maneuvers
   description: 'DANGER: enabling these maneuvers replaces normal driving behavior with deterministic test sequences. Each

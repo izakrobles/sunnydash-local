@@ -129,3 +129,21 @@ class TestSettings(OpenpilotTestCase):
     page = self.settings.page_schema(TOYOTA_LONG)
     assert page["brand"] == "toyota" and page["vehicle"]["items"]
     assert self.settings.page_schema({"brand": "honda"})["vehicle"] is None
+
+
+class TestUnknownParam(OpenpilotTestCase):
+  def test_schema_item_without_a_param_is_unavailable_not_fatal(self):
+    schema = {"panels": [{"id": "p", "sections": [{"items": [
+      {"key": "NotARealParamKey", "widget": "toggle", "title": "Ghost"},
+      {"key": "DisengageOnAccelerator", "widget": "toggle", "title": "Real"},
+    ]}]}]}
+    settings = Settings(Params(), schema)
+    state = settings.state({}, onroad=False, engaged=False)
+    assert state["values"]["NotARealParamKey"] is None
+    assert not state["status"]["NotARealParamKey"]["enabled"]
+    assert state["status"]["DisengageOnAccelerator"]["enabled"]
+    try:
+      settings.apply("NotARealParamKey", True, {}, onroad=False, engaged=False)
+      raise AssertionError("expected SettingError")
+    except SettingError as e:
+      assert e.status == 409

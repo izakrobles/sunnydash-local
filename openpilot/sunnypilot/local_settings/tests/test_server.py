@@ -1,12 +1,15 @@
 import http.client
 import json
 import threading
+import time
+from types import SimpleNamespace
 
 from openpilot.common.params import Params
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.sunnypilot.local_settings import server
-from openpilot.sunnypilot.local_settings.server import (LOCKOUT_DURATION_S, LOCKOUT_FAILURES, PIN_PARAM, PinGuard,
-                                                        client_allowed, ensure_pin, host_allowed, make_server)
+from openpilot.sunnypilot.local_settings.server import (CONTROLLER_STALE_S, LOCKOUT_DURATION_S, LOCKOUT_FAILURES, PIN_PARAM,
+                                                        ControllerFeed, PinGuard, client_allowed, ensure_pin, host_allowed,
+                                                        make_server)
 
 CAPS = {"brand": "toyota", "has_longitudinal_control": True, "device_type": "mici"}
 
@@ -108,3 +111,83 @@ class TestServer(OpenpilotTestCase):
     assert resp.getheader("X-Frame-Options") == "DENY"
     assert "frame-ancestors 'none'" in resp.getheader("Content-Security-Policy")
     assert resp.getheader("Access-Control-Allow-Origin") is None
+
+
+class FakeJoystickSub:
+  """Stands in for SubMaster(['testJoystick']): hands out the queued messages, then nothing."""
+  def __init__(self, msgs):
+    self.queue = list(msgs)
+    self.current = None
+    self.updated = {"testJoystick": False}
+
+  def update(self, _timeout):
+    if self.queue:
+      self.current = self.queue.pop(0)
+      self.updated["testJoystick"] = True
+    else:
+      self.updated["testJoystick"] = False
+      time.sleep(0.005)
+
+  def __getitem__(self, _key):
+    return self.current
+
+
+def wait_for(cond, timeout=2.):
+  end = time.monotonic() + timeout
+  while time.monotonic() < end:
+    if cond():
+      return True
+    time.sleep(0.01)
+  return False
+
+
+class TestController(OpenpilotTestCase):
+  def test_live_then_stale(self):
+    params = Params()
+    params.put_bool("JoystickDebugMode", True, block=True)
+    now = [100.]
+    msg = SimpleNamespace(axes=[0.3, -0.5], buttons=[True, False])
+    feed = ControllerFeed(params, sub_factory=lambda: FakeJoystickSub([msg]), clock=lambda: now[0])
+    assert wait_for(lambda: feed.snapshot()["axes"])
+
+    snap = feed.snapshot()
+    assert snap["live"] and snap["joystick_mode"]
+    assert snap["axes"] == [0.3, -0.5] and snap["buttons"] == [True, False]
+    assert snap["accel_ms2"] == 1.2  # 0.3 * 4 m/s^2, same scale joystickd uses
+    assert snap["steer"] == -0.5
+
+    now[0] += CONTROLLER_STALE_S + 0.05  # joystickd would ignore it now, so the page shows nothing requested
+    snap = feed.snapshot()
+    assert not snap["live"] and snap["accel_ms2"] == 0. and snap["steer"] == 0.
+    assert snap["axes"] == [0.3, -0.5]  # raw values stay visible
+
+  def test_nothing_received(self):
+    feed = ControllerFeed(Params(), sub_factory=lambda: FakeJoystickSub([]))
+    snap = feed.snapshot()
+    assert not snap["live"] and snap["age"] is None and snap["axes"] == [] and snap["rate_hz"] == 0
+
+  def test_endpoint_needs_pin(self):
+    params = Params()
+    params.put_bool("IsOffroad", True, block=True)
+    msg = SimpleNamespace(axes=[-1.0, 0.25], buttons=[])
+    srv = make_server(params, port=0, host="127.0.0.1", caps_fn=lambda _p: CAPS,
+                      controller_sub=lambda: FakeJoystickSub([msg] * 1000))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+      port, pin = srv.server_address[1], params.get(PIN_PARAM)
+
+      def get(headers):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/controller", headers=headers)
+        resp = conn.getresponse()
+        body = json.loads(resp.read())
+        conn.close()
+        return resp.status, body
+
+      assert get({})[0] == 401
+      assert wait_for(lambda: get({"X-Pin": pin})[1]["live"])
+      status, body = get({"X-Pin": pin})
+      assert status == 200 and body["accel_ms2"] == -4.0 and body["steer"] == 0.25
+    finally:
+      srv.shutdown()
+      srv.server_close()

@@ -30,6 +30,8 @@ LOCKOUT_FAILURES = 8          # wrong PINs within LOCKOUT_WINDOW_S before the pa
 LOCKOUT_WINDOW_S = 300.
 LOCKOUT_DURATION_S = 300.
 CAPS_CACHE_S = 5.
+CONTROLLER_STALE_S = 0.2      # joystickd ignores controller input older than this
+CONTROLLER_ACCEL_SCALE = 4.0  # joystickd: accel request (m/s^2) = axes[0] * this
 
 CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; " +
        "img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
@@ -134,7 +136,74 @@ class DeviceState:
     return self.params.get_bool("IsEngaged")
 
 
-def make_handler(settings: Settings, device: DeviceState, guard: PinGuard, page: bytes):
+class ControllerFeed:
+  """The latest testJoystick message, which is exactly what joystickd acts on: axes[0] is gas/brake, axes[1] steering.
+
+  Only subscribes once the page first asks, so it costs nothing until someone opens the Controller tab.
+  """
+  def __init__(self, params, sub_factory=None, clock=time.monotonic):
+    self.params = params
+    self._sub_factory = sub_factory
+    self._clock = clock
+    self._lock = threading.Lock()
+    self._thread: threading.Thread | None = None
+    self._axes: list[float] = []
+    self._buttons: list[bool] = []
+    self._received_t: float | None = None
+    self._times: list[float] = []
+
+  def _subscribe(self):
+    if self._sub_factory is not None:
+      return self._sub_factory()
+    from openpilot.cereal import messaging
+    return messaging.SubMaster(["testJoystick"])
+
+  def _run(self):
+    try:
+      sm = self._subscribe()
+    except Exception:
+      cloudlog.exception("local_settings: couldn't subscribe to testJoystick")
+      return
+    while True:
+      sm.update(100)
+      if sm.updated["testJoystick"]:
+        msg = sm["testJoystick"]
+        now = self._clock()
+        with self._lock:
+          self._axes = [float(a) for a in msg.axes]
+          self._buttons = [bool(b) for b in msg.buttons]
+          self._received_t = now
+          self._times = [t for t in self._times if now - t < 1.] + [now]
+
+  def _ensure_started(self):
+    with self._lock:
+      if self._thread is None:
+        self._thread = threading.Thread(target=self._run, name="local_settings_controller", daemon=True)
+        self._thread.start()
+
+  def snapshot(self) -> dict:
+    self._ensure_started()
+    now = self._clock()
+    with self._lock:
+      age = None if self._received_t is None else now - self._received_t
+      live = age is not None and age < CONTROLLER_STALE_S
+      axes = list(self._axes)
+      rate = len([t for t in self._times if now - t < 1.])
+      buttons = list(self._buttons)
+    return {
+      "live": live,
+      "age": None if age is None else round(age, 2),
+      "rate_hz": rate,
+      "axes": [round(a, 4) for a in axes],
+      "buttons": buttons,
+      # what joystickd would request from the car right now (it zeroes stale input)
+      "accel_ms2": round(CONTROLLER_ACCEL_SCALE * max(-1., min(1., axes[0])), 2) if live and axes else 0.,
+      "steer": round(max(-1., min(1., axes[1])), 4) if live and len(axes) > 1 else 0.,
+      "joystick_mode": self.params.get_bool("JoystickDebugMode"),
+    }
+
+
+def make_handler(settings: Settings, device: DeviceState, guard: PinGuard, page: bytes, controller: ControllerFeed):
   class Handler(BaseHTTPRequestHandler):
     server_version = "sunnydash"
     sys_version = ""
@@ -187,6 +256,9 @@ def make_handler(settings: Settings, device: DeviceState, guard: PinGuard, page:
       elif path == "/api/state":
         if self._authorized():
           self._json(200, self._state())
+      elif path == "/api/controller":
+        if self._authorized():
+          self._json(200, controller.snapshot())
       else:
         self._json(404, {"error": "Not found"})
 
@@ -233,12 +305,13 @@ def make_handler(settings: Settings, device: DeviceState, guard: PinGuard, page:
   return Handler
 
 
-def make_server(params=None, port: int = PORT, host: str = "0.0.0.0", caps_fn=None, schema=None):
+def make_server(params=None, port: int = PORT, host: str = "0.0.0.0", caps_fn=None, schema=None, controller_sub=None):
   params = params or Params()
   ensure_pin(params)
   with open(PAGE_PATH, "rb") as f:
     page = f.read()
-  handler = make_handler(Settings(params, schema), DeviceState(params, caps_fn), PinGuard(), page)
+  handler = make_handler(Settings(params, schema), DeviceState(params, caps_fn), PinGuard(), page,
+                         ControllerFeed(params, controller_sub))
   server = ThreadingHTTPServer((host, port), handler)
   server.daemon_threads = True
   return server
