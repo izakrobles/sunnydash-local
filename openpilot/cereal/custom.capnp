@@ -510,5 +510,15 @@ struct CustomReserved17 @0xa30662f84033036c {
 struct CustomReserved18 @0xc86a3d38d13eb3ef {
 }
 
-struct CustomReserved19 @0xa4f1eb3323f5f582 {
+# sunnydash: which distraction-alert timing driver monitoring is using right now
+struct DriverMonitoringStateSP @0xa4f1eb3323f5f582 {
+  alertMode @0 :AlertMode;
+  sceneConfidence @1 :Float32;      # smoothed driving model confidence, 0-1
+  confidenceThreshold @2 :Float32;  # early alert threshold, 0-1
+
+  enum AlertMode {
+    off @0;      # early alert setting is off: stock timing
+    quick @1;    # scene confidence below threshold: chime as soon as you look away
+    relaxed @2;  # scene confidence at or above threshold: chimes at 30, 45 and 60 seconds
+  }
 }

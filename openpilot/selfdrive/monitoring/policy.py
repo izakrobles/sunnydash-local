@@ -2,7 +2,7 @@ from collections import defaultdict
 from math import atan2, radians
 import numpy as np
 
-from openpilot.cereal import log
+from openpilot.cereal import custom, log
 from opendbc.car.structs import car
 import openpilot.cereal.messaging as messaging
 from openpilot.common.realtime import DT_DMON
@@ -12,6 +12,7 @@ from openpilot.common.stat_live import RunningStatFilter
 from openpilot.common.transformations.camera import DEVICE_CAMERAS
 
 AlertLevel = log.DriverMonitoringState.AlertLevel
+EarlyAlertMode = custom.DriverMonitoringStateSP.AlertMode
 MonitoringPolicy = log.DriverMonitoringState.MonitoringPolicy
 
 def to_percent(v):
@@ -221,9 +222,17 @@ class DriverMonitoring:
     if self.early_alert_active and self.alert_level == AlertLevel.none:
       self.alert_level = AlertLevel.one
 
+  def early_alert_mode(self):
+    """Which alert timing is in effect: off (stock), quick (low confidence) or relaxed (confident scene)."""
+    if not self.early_alert_enabled:
+      return EarlyAlertMode.off
+    if self.scene_confidence_filter.x >= self.early_alert_confidence:
+      return EarlyAlertMode.relaxed
+    return EarlyAlertMode.quick
+
   def _vision_policy_timings(self):
     s = self.settings
-    if not (self.early_alert_enabled and self.scene_confidence_filter.x >= self.early_alert_confidence):
+    if self.early_alert_mode() != EarlyAlertMode.relaxed:
       return s._VISION_POLICY_ALERT_1_TIMEOUT, s._VISION_POLICY_ALERT_2_TIMEOUT, s._VISION_POLICY_ALERT_3_TIMEOUT
 
     # confident scene: stretch the whole escalation, not just the first chime
@@ -447,6 +456,14 @@ class DriverMonitoring:
         self.alert_level = AlertLevel.two
       elif self.awareness <= self.threshold_alert_1:
         self.alert_level = AlertLevel.one
+
+  def get_sp_state_packet(self, valid=True):
+    dat = messaging.new_message('driverMonitoringStateSP', valid=valid)
+    dm_sp = dat.driverMonitoringStateSP
+    dm_sp.alertMode = self.early_alert_mode()
+    dm_sp.sceneConfidence = float(self.scene_confidence_filter.x)
+    dm_sp.confidenceThreshold = float(self.early_alert_confidence)
+    return dat
 
   def get_state_packet(self, valid=True):
     # build driverMonitoringState packet

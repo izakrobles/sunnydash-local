@@ -297,6 +297,22 @@ class TestConfidenceEarlyAlert(OpenpilotTestCase):
       alert_lvls.append(dm.alert_level)
     return alert_lvls, dm
 
+  def test_alert_mode_reports_timing_in_effect(self):
+    from openpilot.selfdrive.monitoring.policy import EarlyAlertMode
+    _, dm = self._run_early_seq(always_attentive[:5], 0.5, enabled=False)
+    assert dm.early_alert_mode() == EarlyAlertMode.off
+    _, dm = self._run_early_seq(always_attentive[:5], 0.5, threshold=80)
+    assert dm.early_alert_mode() == EarlyAlertMode.quick
+    _, dm = self._run_early_seq(always_attentive[:5], 0.8, threshold=80)
+    assert dm.early_alert_mode() == EarlyAlertMode.relaxed
+
+  def test_sp_state_packet(self):
+    _, dm = self._run_early_seq(always_attentive[:5], 0.9, threshold=85)
+    dm_sp = dm.get_sp_state_packet().driverMonitoringStateSP
+    assert dm_sp.alertMode == "relaxed"
+    assert abs(dm_sp.sceneConfidence - 0.9) < 1e-6
+    assert abs(dm_sp.confidenceThreshold - 0.85) < 1e-6
+
   def test_disabled_keeps_stock_timing(self):
     alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, enabled=False)
     assert alert_lvls[ONE_SECOND] == AlertLevel.none

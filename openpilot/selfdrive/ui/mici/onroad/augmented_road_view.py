@@ -13,6 +13,7 @@ from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.mici.onroad.navigation import NavigationPanel, PANEL_WIDTH
 from openpilot.selfdrive.ui.mici.onroad.confidence_ball import ConfidenceBall
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
+from openpilot.selfdrive.ui.sunnypilot.mici.onroad.early_alert_badge import EarlyAlertBadge
 from openpilot.system.ui.lib.application import FontWeight, gui_app, MousePos, MouseEvent, TextAlignment, TextAlignmentVertical
 from openpilot.system.ui.widgets.label import UnifiedLabel
 from openpilot.system.ui.widgets import Widget
@@ -180,6 +181,7 @@ class AugmentedRoadView(CameraView):
     self._long_indicator = LongIndicator()
     self._alert_renderer = AlertRenderer()
     self._driver_state_renderer = DriverStateRenderer()
+    self._early_alert_badge = EarlyAlertBadge()
     self._confidence_ball = ConfidenceBall()
     self._offroad_label = UnifiedLabel("start the car to\nuse sunnypilot", 54, FontWeight.DISPLAY,
                                        text_color=rl.Color(255, 255, 255, int(255 * 0.9)),
@@ -255,6 +257,11 @@ class AugmentedRoadView(CameraView):
     self._driver_state_renderer.set_should_draw(should_draw_dmoji)
     self._driver_state_renderer.set_position(self._rect.x + 16, self._rect.y + 10)
     self._driver_state_renderer.render()
+    # sunnydash: early alert mode badge, just right of the driver monitoring icon
+    self._early_alert_badge.set_show(self._driver_state_renderer.should_draw)
+    self._early_alert_badge.set_position(self._rect.x + 16 + DriverStateRenderer.BASE_SIZE + 8,
+                                         self._rect.y + 10 + (DriverStateRenderer.BASE_SIZE - EarlyAlertBadge.SIZE) / 2)
+    self._early_alert_badge.render()
     self._long_indicator.set_should_draw(not self._hud_renderer.drawing_top_icons())
     self._long_indicator.render(self._content_rect)
 
