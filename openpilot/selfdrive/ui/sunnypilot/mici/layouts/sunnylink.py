@@ -8,7 +8,7 @@ import pyray as rl
 
 
 from openpilot.cereal import custom
-from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigToggle
+from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigToggle, BigParamControl
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigConfirmationDialog
 from openpilot.selfdrive.ui.sunnypilot.mici.layouts.onboarding import SunnylinkConsentPage
 from openpilot.selfdrive.ui.sunnypilot.mici.widgets.sunnylink_pairing_dialog import SunnylinkPairingDialog
@@ -61,6 +61,12 @@ class SunnylinkLayoutMici(NavScroller):
 
     self._sunnylink_info = SunnylinkInfo()
 
+    # sunnydash: master switch for comma and sunnylink cloud access
+    self._cloud_block_toggle = BigParamControl(tr("block comma & sunnylink cloud"), "PrivateDashcamBlockCloud",
+                                               description=tr("Stops every connection to comma and sunnylink: remote access, uploads,\n" +
+                                                              "registration, logs, stats and backups.\n" +
+                                                              "Updates, model downloads and your private dashcam still work."))
+
     self._sunnylink_toggle = BigToggle(text=tr("enable sunnylink"),
                                        initial_state=self._sunnylink_enabled,
                                        toggle_callback=self._sunnylink_toggle_callback)
@@ -74,6 +80,7 @@ class SunnylinkLayoutMici(NavScroller):
                                                 toggle_callback=self._sunnylink_uploader_callback)
 
     self._scroller.add_widgets([
+      self._cloud_block_toggle,
       self._sunnylink_info,
       self._sunnylink_toggle,
       self._sunnylink_sponsor_button,
@@ -86,17 +93,21 @@ class SunnylinkLayoutMici(NavScroller):
   def _update_state(self):
     super()._update_state()
     self._sunnylink_enabled = ui_state.params.get("SunnylinkEnabled")
+    cloud_blocked = ui_state.params.get_bool("PrivateDashcamBlockCloud")
+    self._cloud_block_toggle.set_checked(cloud_blocked)
     self._sunnylink_toggle.set_checked(self._sunnylink_enabled)
-    self._sunnylink_pair_button.set_visible(self._sunnylink_enabled)
-    self._sunnylink_sponsor_button.set_visible(self._sunnylink_enabled)
-    self._backup_btn.set_visible(self._sunnylink_enabled)
-    self._restore_btn.set_visible(self._sunnylink_enabled)
-    self._sunnylink_uploader_toggle.set_visible(self._sunnylink_enabled)
+    self._sunnylink_toggle.set_visible(not cloud_blocked)
+    sunnylink_usable = self._sunnylink_enabled and not cloud_blocked
+    self._sunnylink_pair_button.set_visible(sunnylink_usable)
+    self._sunnylink_sponsor_button.set_visible(sunnylink_usable)
+    self._backup_btn.set_visible(sunnylink_usable)
+    self._restore_btn.set_visible(sunnylink_usable)
+    self._sunnylink_uploader_toggle.set_visible(sunnylink_usable)
     self.handle_backup_restore_progress()
 
     self._sunnylink_info.device_id_text.set_text(ui_state.params.get("SunnylinkDongleId") or UNREGISTERED_SUNNYLINK_DONGLE_ID)
     self._sunnylink_info.sponsor_text.set_text(ui_state.sunnylink_state.get_sponsor_tier().name.lower() or "N/A")
-    self._sunnylink_info.set_visible(self._sunnylink_enabled)
+    self._sunnylink_info.set_visible(sunnylink_usable)
 
     if ui_state.sunnylink_state.is_sponsor():
       self._sunnylink_sponsor_button.set_text(tr("thanks"))
