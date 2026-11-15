@@ -283,108 +283,178 @@ class TestRunStepEngagement(OpenpilotTestCase):
 
 
 ONE_SECOND = int(1 / DT_DMON)
+MPH = 0.44704
 
 
 class TestConfidenceEarlyAlert(OpenpilotTestCase):
-  def _run_early_seq(self, msgs, scene_confidence, enabled=True, threshold=80, engaged=True, lowspeed=False):
+  CITY = 25 * MPH       # 11.2 m/s, below the leniency ramp: stock timing only
+  TOWN = 40 * MPH       # 17.9 m/s, low confidence still gets stock timing here
+  RAMP_MID = 42 * MPH   # 18.8 m/s, about half speed factor
+  HIGHWAY = 60 * MPH    # 26.8 m/s, above the ramp: full leniency
+
+  def _run_early_seq(self, msgs, scene_confidence, enabled=True, threshold=80, engaged=True, lowspeed=False,
+                     speed=0.):
     dm = DriverMonitoring()
     dm.set_early_alert(enabled, threshold)
     alert_lvls = []
     for msg in msgs:
       dm.scene_confidence_filter.x = scene_confidence
-      dm._update_states(msg, [0, 0, 0], 0, engaged, lowspeed)
+      dm._update_states(msg, [0, 0, 0], speed, engaged, lowspeed)
       dm._update_events(False, engaged, lowspeed, False)
       alert_lvls.append(dm.alert_level)
     return alert_lvls, dm
+
+  def _timings(self, dm):
+    return dm._vision_policy_timings()
 
   def test_alert_mode_reports_timing_in_effect(self):
     from openpilot.selfdrive.monitoring.policy import EarlyAlertMode
     _, dm = self._run_early_seq(always_attentive[:5], 0.5, enabled=False)
     assert dm.early_alert_mode() == EarlyAlertMode.off
-    _, dm = self._run_early_seq(always_attentive[:5], 0.5, threshold=80)
+    # low confidence means no leniency, however fast you are going
+    _, dm = self._run_early_seq(always_attentive[:5], 0.5, threshold=80, speed=self.HIGHWAY)
     assert dm.early_alert_mode() == EarlyAlertMode.quick
-    _, dm = self._run_early_seq(always_attentive[:5], 0.8, threshold=80)
+    # confident scene, paying attention, highway speed: full leniency
+    _, dm = self._run_early_seq(always_attentive[:5], 0.8, threshold=80, speed=self.HIGHWAY)
     assert dm.early_alert_mode() == EarlyAlertMode.relaxed
 
   def test_sp_state_packet(self):
-    _, dm = self._run_early_seq(always_attentive[:5], 0.9, threshold=85)
+    _, dm = self._run_early_seq(always_attentive[:5], 0.9, threshold=85, speed=self.HIGHWAY)
     dm_sp = dm.get_sp_state_packet().driverMonitoringStateSP
     assert dm_sp.alertMode == "relaxed"
     assert abs(dm_sp.sceneConfidence - 0.9) < 1e-6
     assert abs(dm_sp.confidenceThreshold - 0.85) < 1e-6
+    assert abs(dm_sp.leniency - 1.0) < 1e-6
+
+  def test_leniency_scales_with_speed(self):
+    for speed, expected in [(self.CITY, 0.), (30 * MPH, 0.), (self.RAMP_MID, 0.48), (55 * MPH, 1.),
+                            (self.HIGHWAY, 1.)]:
+      _, dm = self._run_early_seq(always_attentive[:10], 0.9, speed=speed)
+      assert abs(dm.leniency - expected) < 0.05, f"{speed / MPH:.0f}mph gave {dm.leniency:.2f}"
+
+  def test_leniency_scales_with_attention(self):
+    # same confident highway scene, only the attention differs
+    _, attentive = self._run_early_seq(always_attentive[:10 * ONE_SECOND], 0.9, speed=self.HIGHWAY)
+    _, distracted = self._run_early_seq(always_distracted[:10 * ONE_SECOND], 0.9, speed=self.HIGHWAY)
+    assert attentive.leniency > 0.9
+    assert distracted.leniency < 0.1
+    assert self._timings(attentive)[0] > 25.
+    assert self._timings(distracted)[0] < 6.
+
+  def test_sustained_distraction_erodes_leniency(self):
+    # a glance is cheap, staying gone drains the allowance towards the stock timing
+    dm = DriverMonitoring()
+    dm.set_early_alert(True, 80)
+    leniencies = []
+    for i in range(10 * ONE_SECOND):
+      dm.scene_confidence_filter.x = 0.9
+      dm._update_states(msg_DISTRACTED, [0, 0, 0], self.HIGHWAY, True, False)
+      if i in (ONE_SECOND, 3 * ONE_SECOND, 8 * ONE_SECOND):
+        leniencies.append(dm.leniency)
+    assert leniencies[0] > leniencies[1] > leniencies[2]
+    assert leniencies[2] < 0.2
+
+  def test_lenient_timeouts_blend_with_leniency(self):
+    dm = DriverMonitoring()
+    dm.set_early_alert(True, 80)
+    dm.scene_confidence_filter.x = 0.9
+    dm.leniency = 0.5
+    t1, _, t3 = self._timings(dm)
+    s = dm_settings
+    expected_t1 = s._VISION_POLICY_ALERT_1_TIMEOUT + 0.5 * (s._LENIENT_ALERT_1_TIMEOUT - s._VISION_POLICY_ALERT_1_TIMEOUT)
+    expected_t3 = s._VISION_POLICY_ALERT_3_TIMEOUT + 0.5 * (s._LENIENT_ALERT_3_TIMEOUT - s._VISION_POLICY_ALERT_3_TIMEOUT)
+    assert abs(t1 - expected_t1) < 1e-6
+    assert abs(t3 - expected_t3) < 1e-6
 
   def test_disabled_keeps_stock_timing(self):
-    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, enabled=False)
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, enabled=False, speed=self.HIGHWAY)
     assert alert_lvls[ONE_SECOND] == AlertLevel.none
     assert alert_lvls[int(dm_settings._VISION_POLICY_ALERT_1_TIMEOUT / 2 / DT_DMON)] == AlertLevel.none
 
-  def test_low_confidence_chimes_within_a_second(self):
-    alert_lvls, dm = self._run_early_seq(always_distracted, 0.5)
-    assert alert_lvls[ONE_SECOND] == AlertLevel.one
+  def test_urgent_chime_at_highway_speed(self):
+    alert_lvls, dm = self._run_early_seq(always_distracted, 0.5, speed=self.HIGHWAY)
+    assert alert_lvls[ONE_SECOND // 2] == AlertLevel.none  # not instant, but nearly
+    assert alert_lvls[int(1.5 / DT_DMON)] == AlertLevel.one
     assert dm.early_alert_active
 
+  def test_urgent_chime_ramps_with_speed(self):
+    # partway up the ramp the hold is longer, so the chime lands later than on the highway
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, speed=50 * MPH)
+    assert alert_lvls[int(1.2 / DT_DMON)] == AlertLevel.none
+    assert alert_lvls[int(2.2 / DT_DMON)] == AlertLevel.one
+
+  def test_uncertain_scene_at_town_speed_keeps_stock_timing(self):
+    # 40 mph with a confidence drop is exactly the looking-around case, so stock timing only
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, speed=self.TOWN)
+    assert alert_lvls[4 * ONE_SECOND] == AlertLevel.none
+    assert alert_lvls[int((dm_settings._VISION_POLICY_ALERT_1_TIMEOUT + 0.5) / DT_DMON)] == AlertLevel.one
+
+  def test_urgent_chime_never_at_city_speed(self):
+    alert_lvls, dm = self._run_early_seq(always_distracted, 0.5, speed=self.CITY)
+    assert alert_lvls[ONE_SECOND] == AlertLevel.none
+    assert alert_lvls[3 * ONE_SECOND] == AlertLevel.none
+    assert not dm.early_alert_active
+    # stock timing still applies, so it does eventually alert
+    assert alert_lvls[int(DISTRACTED_SECONDS_TO_ORANGE / DT_DMON)] == AlertLevel.two
+
+  def test_brief_glance_at_highway_speed_is_free(self):
+    msgs = [msg_DISTRACTED] * ONE_SECOND + [msg_ATTENTIVE] * (2 * ONE_SECOND)
+    low_conf, dm = self._run_early_seq(msgs, 0.5, speed=self.HIGHWAY)
+    assert all(a == AlertLevel.none for a in low_conf)
+    assert not dm.early_alert_active
+
   def test_low_confidence_keeps_stock_orange_and_red(self):
-    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5)
-    stock_lvls, _ = self._run_early_seq(always_distracted, 0.5, enabled=False)
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, speed=self.HIGHWAY)
+    stock_lvls, _ = self._run_early_seq(always_distracted, 0.5, enabled=False, speed=self.HIGHWAY)
     # escalation past the early chime is untouched, so lockout risk doesn't change
     assert alert_lvls.index(AlertLevel.two) == stock_lvls.index(AlertLevel.two)
     assert alert_lvls.index(AlertLevel.three) == stock_lvls.index(AlertLevel.three)
-    assert alert_lvls[int(DISTRACTED_SECONDS_TO_ORANGE / DT_DMON)] == AlertLevel.two
-    assert alert_lvls[int(DISTRACTED_SECONDS_TO_RED / DT_DMON)] == AlertLevel.three
 
-  def test_high_confidence_delays_first_alert(self):
-    s = dm_settings
-    alert_lvls, dm = self._run_early_seq(always_distracted, 0.9, threshold=80)
-    assert alert_lvls[ONE_SECOND] == AlertLevel.none
-    assert alert_lvls[int(s._VISION_POLICY_ALERT_1_TIMEOUT / 2 / DT_DMON)] == AlertLevel.none
-    assert alert_lvls[int((s._LENIENT_ALERT_1_TIMEOUT - 1) / DT_DMON)] == AlertLevel.none
-    assert alert_lvls[int((s._LENIENT_ALERT_1_TIMEOUT + 1) / DT_DMON)] == AlertLevel.one
-    assert not dm.early_alert_active
+  def test_confident_scene_and_attention_get_leniency(self):
+    msgs = [msg_ATTENTIVE] * (5 * ONE_SECOND) + [msg_DISTRACTED] * (30 * ONE_SECOND)
+    alert_lvls, _ = self._run_early_seq(msgs, 0.9, speed=self.HIGHWAY)
+    first_one = alert_lvls.index(AlertLevel.one)
+    # stock would have chimed 5s after the driver looked away
+    assert alert_lvls[8 * ONE_SECOND] == AlertLevel.none
+    assert 12 * ONE_SECOND < first_one < 25 * ONE_SECOND
 
-  def test_high_confidence_escalates_from_lenient_timings(self):
-    s = dm_settings
-    alert_lvls, _ = self._run_early_seq(always_distracted, 0.9, threshold=80)
-    assert alert_lvls[int((s._LENIENT_ALERT_1_TIMEOUT + 1) / DT_DMON)] == AlertLevel.one
-    assert alert_lvls[int((s._LENIENT_ALERT_2_TIMEOUT - 1) / DT_DMON)] == AlertLevel.one
-    assert alert_lvls[int((s._LENIENT_ALERT_2_TIMEOUT + 1) / DT_DMON)] == AlertLevel.two
-    assert alert_lvls[int((s._LENIENT_ALERT_3_TIMEOUT - 1) / DT_DMON)] == AlertLevel.two
-    assert alert_lvls[int((s._LENIENT_ALERT_3_TIMEOUT + 1) / DT_DMON)] == AlertLevel.three
-
-  def test_confidence_at_threshold_is_lenient(self):
-    s = dm_settings
-    alert_lvls, _ = self._run_early_seq(always_distracted, 0.8, threshold=80)
-    assert alert_lvls[int(s._VISION_POLICY_ALERT_1_TIMEOUT / 2 / DT_DMON)] == AlertLevel.none
-    assert alert_lvls[int((s._LENIENT_ALERT_1_TIMEOUT + 1) / DT_DMON)] == AlertLevel.one
+  def test_confidence_at_threshold_counts_as_confident(self):
+    dm = DriverMonitoring()
+    dm.set_early_alert(True, 80)
+    for _ in range(5):
+      dm.scene_confidence_filter.x = 0.8
+      dm._update_states(msg_ATTENTIVE, [0, 0, 0], self.HIGHWAY, True, False)
+    assert dm.leniency > 0.9
 
   def test_threshold_is_respected(self):
-    # 85% confidence chimes early with a 90% threshold, but not with an 80% one
-    lvls_90, _ = self._run_early_seq(always_distracted, 0.85, threshold=90)
-    lvls_80, _ = self._run_early_seq(always_distracted, 0.85, threshold=80)
-    assert lvls_90[ONE_SECOND] == AlertLevel.one
-    assert lvls_80[ONE_SECOND] == AlertLevel.none
+    # 85% confidence counts as relaxed with an 80% threshold, but not with a 90% one
+    _, lenient = self._run_early_seq(always_attentive[:10], 0.85, threshold=80, speed=self.HIGHWAY)
+    _, strict = self._run_early_seq(always_attentive[:10], 0.85, threshold=90, speed=self.HIGHWAY)
+    assert lenient.leniency > 0.9
+    assert strict.leniency == 0.
 
   def test_clears_when_driver_looks_back(self):
-    msgs = [msg_DISTRACTED] * ONE_SECOND + [msg_ATTENTIVE] * ONE_SECOND
-    alert_lvls, dm = self._run_early_seq(msgs, 0.5)
-    assert alert_lvls[ONE_SECOND - 1] == AlertLevel.one
+    msgs = [msg_DISTRACTED] * (2 * ONE_SECOND) + [msg_ATTENTIVE] * ONE_SECOND
+    alert_lvls, dm = self._run_early_seq(msgs, 0.5, speed=self.HIGHWAY)
+    assert alert_lvls[2 * ONE_SECOND - 1] == AlertLevel.one
     assert alert_lvls[-1] == AlertLevel.none
     assert not dm.early_alert_active
 
   def test_attentive_driver_never_alerted(self):
-    alert_lvls, _ = self._run_early_seq(always_attentive, 0.0)
+    alert_lvls, _ = self._run_early_seq(always_attentive, 0.0, speed=self.HIGHWAY)
     assert all(a == AlertLevel.none for a in alert_lvls)
 
   def test_no_early_alert_at_low_speed(self):
-    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, lowspeed=True)
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, lowspeed=True, speed=self.HIGHWAY)
     assert alert_lvls[ONE_SECOND] == AlertLevel.none
 
   def test_no_early_alert_when_disengaged(self):
-    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, engaged=False)
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.5, engaged=False, speed=self.HIGHWAY)
     assert all(a == AlertLevel.none for a in alert_lvls)
 
   def test_no_early_alert_without_face(self):
     # wheel-touch fallback can't tell where the driver is looking, so stock timing applies
-    alert_lvls, _ = self._run_early_seq(always_no_face, 0.5)
+    alert_lvls, _ = self._run_early_seq(always_no_face, 0.5, speed=self.HIGHWAY)
     assert alert_lvls[ONE_SECOND] == AlertLevel.none
 
   @parameterized.expand([(50, 0.70), (70, 0.70), (85, 0.85), (95, 0.95), (100, 0.95), (None, 0.80)])

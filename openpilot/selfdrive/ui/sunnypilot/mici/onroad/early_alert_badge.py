@@ -1,7 +1,10 @@
 """
-sunnydash: small eye badge next to the driver monitoring icon showing which distraction-alert timing is active.
-  orange eye: quick, scene confidence is below the threshold, a look away chimes right away
-  white eye:  relaxed, scene confidence is at or above the threshold, chimes come at 30, 45 and 60 seconds
+sunnydash: small eye badge next to the driver monitoring icon showing how much distraction-alert
+leniency is currently in effect.
+  orange eye: little leniency, confidence-based timing is doing nothing much
+  white eye:  relaxed, near the 30, 45 and 60 second timing
+The colour fades between the two with the reported leniency, which drops at low speed, when the
+driving model loses confidence and when you stop looking at the road.
 Hidden when the early alert setting is off (stock timing).
 """
 import pyray as rl
@@ -27,9 +30,10 @@ class EarlyAlertBadge(Widget):
     self.set_rect(rl.Rectangle(0, 0, self.SIZE, self.SIZE))
     self._eye = gui_app.texture("icons_mici/onroad/eye_fill.png", self.EYE_SIZE, self.EYE_SIZE)
     self._mode = EarlyAlertMode.off
+    self._leniency = 0.0
     self._show = False
     self._fade_filter = FirstOrderFilter(0.0, 0.05, 1 / gui_app.target_fps)
-    self._quick_filter = FirstOrderFilter(0.0, 0.05, 1 / gui_app.target_fps)  # 1.0 = full orange
+    self._quick_filter = FirstOrderFilter(1.0, 0.05, 1 / gui_app.target_fps)  # 1.0 = full orange
 
   def set_show(self, show: bool):
     self._show = show
@@ -42,12 +46,14 @@ class EarlyAlertBadge(Widget):
     sm = ui_state.sm
     if sm.recv_frame["driverMonitoringStateSP"] > ui_state.started_frame:
       self._mode = sm["driverMonitoringStateSP"].alertMode
+      self._leniency = sm["driverMonitoringStateSP"].leniency
     else:
       self._mode = EarlyAlertMode.off
+      self._leniency = 0.0
 
     visible = self._show and self._mode != EarlyAlertMode.off
     self._fade_filter.update(1.0 if visible else 0.0)
-    self._quick_filter.update(1.0 if self._mode == EarlyAlertMode.quick else 0.0)
+    self._quick_filter.update(1.0 - min(max(self._leniency, 0.0), 1.0))
 
   def _render(self, _):
     alpha = self._fade_filter.x

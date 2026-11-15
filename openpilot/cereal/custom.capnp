@@ -515,10 +515,11 @@ struct DriverMonitoringStateSP @0xa4f1eb3323f5f582 {
   alertMode @0 :AlertMode;
   sceneConfidence @1 :Float32;      # smoothed driving model confidence, 0-1
   confidenceThreshold @2 :Float32;  # early alert threshold, 0-1
+  leniency @3 :Float32;             # 0 = stock timing, 1 = full 30/45/60 timing
 
   enum AlertMode {
     off @0;      # early alert setting is off: stock timing
-    quick @1;    # scene confidence below threshold: chime as soon as you look away
-    relaxed @2;  # scene confidence at or above threshold: chimes at 30, 45 and 60 seconds
+    quick @1;    # little leniency: stock timing, with the urgent chime above 30 mph
+    relaxed @2;  # near the lenient timing of 30, 45 and 60 seconds
   }
 }

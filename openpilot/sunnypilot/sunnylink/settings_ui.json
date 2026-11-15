@@ -1815,13 +1815,13 @@
               "key": "DriverMonitorEarlyAlert",
               "widget": "toggle",
               "title": "Confidence-Based Early Alert",
-              "description": "Chime as soon as you look away from the road when the driving model's confidence in the scene drops below the threshold. At or above the threshold, chimes are delayed to 30, 45 and 60 seconds. This chime plays even when Quiet Mode is on."
+              "description": "Chime sooner when the driving model's confidence in the scene drops and you are clearly not looking at the road. Leniency scales with speed and attention, with stock timing at city speeds and up to 30, 45 and 60 seconds once you are on the highway and paying attention. This chime plays even when Quiet Mode is on."
             },
             {
               "key": "DriverMonitorEarlyAlertConfidence",
               "widget": "option",
               "title": "Early Alert Below Confidence",
-              "description": "Scene confidence below which distraction chimes immediately instead of after 5 seconds. At or above it, chimes are delayed to 30, 45 and 60 seconds.",
+              "description": "Scene confidence below which the urgent chime applies. At highway speed it fires within about a second, ramping out to stock timing in town. Only the first chime is pulled forward, orange and red keep their stock timing.",
               "min": 70,
               "max": 95,
               "step": 5,
