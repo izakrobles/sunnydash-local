@@ -7,9 +7,9 @@ from types import SimpleNamespace
 from openpilot.common.params import Params
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.sunnypilot.local_settings import server
-from openpilot.sunnypilot.local_settings.server import (CONTROLLER_STALE_S, LOCKOUT_DURATION_S, LOCKOUT_FAILURES, PIN_PARAM,
-                                                        ControllerFeed, PinGuard, client_allowed, ensure_pin, host_allowed,
-                                                        make_server)
+from openpilot.sunnypilot.local_settings.server import (CAR_STATE_STALE_S, CONTROLLER_STALE_S, LOCKOUT_DURATION_S,
+                                                        LOCKOUT_FAILURES, PIN_PARAM, ControllerFeed, DeviceState, PinGuard,
+                                                        client_allowed, ensure_pin, host_allowed, make_server)
 
 CAPS = {"brand": "toyota", "has_longitudinal_control": True, "device_type": "mici"}
 
@@ -90,7 +90,7 @@ class TestServer(OpenpilotTestCase):
 
     self.params.put_bool("IsOffroad", False, block=True)
     status, body = self.request("POST", "/api/set", {"key": "Mads", "value": False})
-    assert status == 409 and "Park" in body["error"]
+    assert status == 409 and "car off" in body["error"]
 
   def test_missing_offroad_flag_counts_as_driving(self):
     self.params.remove("IsOffroad")
@@ -139,6 +139,63 @@ def wait_for(cond, timeout=2.):
       return True
     time.sleep(0.01)
   return False
+
+
+class TestParked(OpenpilotTestCase):
+  def device(self, readings, onroad=True):
+    params = Params()
+    params.put_bool("IsOffroad", not onroad, block=True)
+    self.now = [100.]
+    return DeviceState(params, car_state=lambda: lambda: readings.pop(0) if readings else None, clock=lambda: self.now[0])
+
+  def test_needs_park_and_standstill(self):
+    assert self.device([(0.01, "park", True)]).parked()
+    assert not self.device([(0.01, "drive", True)]).parked()
+    assert not self.device([(0.01, "park", False)]).parked()
+    assert not self.device([]).parked()  # no carState at all
+
+  def test_car_off_is_not_parked(self):
+    assert not self.device([(0.01, "park", True)], onroad=False).parked()
+
+  def test_old_car_state_is_not_trusted(self):
+    assert not self.device([(CAR_STATE_STALE_S + 1., "park", True)]).parked()  # left over from an earlier drive
+
+    device = self.device([(0.01, "park", True)])
+    assert device.parked()
+    assert device.parked()  # nothing new since the last look, still fresh enough
+    self.now[0] += CAR_STATE_STALE_S + 0.1
+    assert not device.parked()
+
+  def test_shifting_out_of_park(self):
+    device = self.device([(0.01, "park", True), (0.01, "drive", True)])
+    assert device.parked()
+    assert not device.parked()
+
+  def test_joystick_mode_from_the_page_with_the_car_on(self):
+    params = Params()
+    params.put_bool("IsOffroad", False, block=True)
+    gear = ["drive"]
+    srv = make_server(params, port=0, host="127.0.0.1", caps_fn=lambda _p: CAPS, car_state=lambda: lambda: (0.01, gear[0], True))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+      def post(value):
+        conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+        conn.request("POST", "/api/set", json.dumps({"key": "JoystickDebugMode", "value": value}),
+                     {"X-Pin": params.get(PIN_PARAM), "Content-Type": "application/json"})
+        resp = conn.getresponse()
+        body = json.loads(resp.read())
+        conn.close()
+        return resp.status, body
+
+      status, body = post(True)
+      assert status == 409 and "park" in body["error"] and not params.get_bool("JoystickDebugMode")
+
+      gear[0] = "park"
+      status, body = post(True)
+      assert status == 200 and body["state"]["parked"] and params.get_bool("JoystickDebugMode")
+    finally:
+      srv.shutdown()
+      srv.server_close()
 
 
 class TestController(OpenpilotTestCase):

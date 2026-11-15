@@ -7,7 +7,7 @@ device: a change is only written if the item exists, isn't blocked, its enableme
 import json
 import math
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from openpilot.common.params import ParamKeyType, UnknownKeyName
 
@@ -28,12 +28,17 @@ BLOCKED_PARAMS = frozenset({
   "LocalSettingsPin",
 })
 
-REASON_OFFROAD = "Park the car to change this"
+REASON_OFFROAD = "Turn the car off to change this"
+REASON_PARK = "Stop and shift into park to change this"
 REASON_ENGAGED = "Disengage to change this"
 REASON_CAR = "Not available on this car"
 REASON_DEVICE = "Not available on this device"
 REASON_DEVICE_ONLY = "Can only be changed on the device"
 REASON_UNAVAILABLE = "Unavailable"
+
+# "Car off only" settings that can also be changed with the car on, as long as it's stopped in park and not engaged.
+# Joystick mode only swaps which process sends the car its commands, and neither sends any until the car is engaged.
+PARKED_OK = frozenset({"JoystickDebugMode"})
 
 
 class SettingError(Exception):
@@ -49,6 +54,7 @@ class Context:
   caps: dict
   onroad: bool
   engaged: bool
+  parked: bool = False  # car on, stopped, shifter in park
 
 
 @dataclass
@@ -211,18 +217,24 @@ class Settings:
     vehicle = self.schema.get("vehicle_settings", {}).get(brand) if brand else None
     return {"panels": self.schema.get("panels", []), "vehicle": vehicle, "brand": brand}
 
-  def context(self, caps: dict, onroad: bool, engaged: bool) -> Context:
+  def context(self, caps: dict, onroad: bool, engaged: bool, parked: bool = False) -> Context:
     values = {key: None if key in self.unknown else read_value(self.params, key, e.item) for key, e in self.entries.items()}
-    return Context(values, caps, onroad, engaged)
+    return Context(values, caps, onroad, engaged, parked)
 
   def status(self, entry: Entry, ctx: Context) -> tuple[bool, str | None]:
     if entry.read_only_reason:
       return False, entry.read_only_reason
+    if ctx.onroad and entry.item["key"] in PARKED_OK:
+      if ctx.engaged:
+        return False, REASON_ENGAGED
+      if not ctx.parked:
+        return False, REASON_PARK
+      ctx = replace(ctx, onroad=False)
     reason = first_failure(entry.gates + [entry.item.get("visibility"), entry.item.get("enablement")], ctx, self.titles)
     return reason is None, reason
 
-  def state(self, caps: dict, onroad: bool, engaged: bool) -> dict:
-    ctx = self.context(caps, onroad, engaged)
+  def state(self, caps: dict, onroad: bool, engaged: bool, parked: bool = False) -> dict:
+    ctx = self.context(caps, onroad, engaged, parked)
     status = {}
     for key, entry in self.entries.items():
       enabled, reason = self.status(entry, ctx)
@@ -233,16 +245,17 @@ class Settings:
       "status": status,
       "onroad": onroad,
       "engaged": engaged,
+      "parked": parked,
       "is_metric": bool(ctx.values.get("IsMetric", self.params.get_bool("IsMetric"))),
     }
 
-  def apply(self, key: str, value, caps: dict, onroad: bool, engaged: bool):
+  def apply(self, key: str, value, caps: dict, onroad: bool, engaged: bool, parked: bool = False):
     """Validate and write one setting. Raises SettingError on anything that isn't allowed right now."""
     entry = self.entries.get(key)
     if entry is None:
       raise SettingError(404, "Unknown setting")
 
-    ctx = self.context(caps, onroad, engaged)
+    ctx = self.context(caps, onroad, engaged, parked)
     enabled, reason = self.status(entry, ctx)
     if not enabled:
       raise SettingError(409, reason or REASON_UNAVAILABLE)

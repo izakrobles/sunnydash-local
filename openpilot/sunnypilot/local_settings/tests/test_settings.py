@@ -1,7 +1,7 @@
 from openpilot.common.params import Params
 from openpilot.common.test import OpenpilotTestCase
-from openpilot.sunnypilot.local_settings.settings import (BLOCKED_PARAMS, REASON_CAR, REASON_DEVICE_ONLY, REASON_OFFROAD,
-                                                          Context, Settings, SettingError, evaluate, load_schema)
+from openpilot.sunnypilot.local_settings.settings import (BLOCKED_PARAMS, REASON_CAR, REASON_DEVICE_ONLY, REASON_ENGAGED,
+                                                          REASON_OFFROAD, REASON_PARK, Context, Settings, SettingError, evaluate, load_schema)
 
 TOYOTA_LONG = {"brand": "toyota", "has_longitudinal_control": True, "device_type": "mici", "torque_allowed": True}
 NO_LONG = {"brand": "honda", "has_longitudinal_control": False, "has_icbm": False, "device_type": "mici"}
@@ -38,8 +38,8 @@ class TestSettings(OpenpilotTestCase):
     self.params = Params()
     self.settings = Settings(self.params)
 
-  def apply(self, key, value, caps=TOYOTA_LONG, onroad=False, engaged=False):
-    self.settings.apply(key, value, caps, onroad, engaged)
+  def apply(self, key, value, caps=TOYOTA_LONG, onroad=False, engaged=False, parked=False):
+    self.settings.apply(key, value, caps, onroad, engaged, parked)
 
   def assert_refused(self, status, key, value, **kw):
     try:
@@ -104,6 +104,23 @@ class TestSettings(OpenpilotTestCase):
     assert self.assert_refused(409, "Mads", False, onroad=True) == REASON_OFFROAD
     self.apply("Mads", False, onroad=False)
     assert not self.params.get_bool("Mads")
+
+  def test_joystick_mode_allowed_with_car_on_only_when_stopped_in_park(self):
+    assert self.assert_refused(409, "JoystickDebugMode", True, onroad=True) == REASON_PARK
+    assert self.assert_refused(409, "JoystickDebugMode", True, onroad=True, engaged=True, parked=True) == REASON_ENGAGED
+    assert not self.params.get_bool("JoystickDebugMode")
+
+    self.apply("JoystickDebugMode", True, onroad=True, parked=True)
+    assert self.params.get_bool("JoystickDebugMode")
+    state = self.settings.state(TOYOTA_LONG, onroad=True, engaged=False, parked=True)
+    assert state["parked"] and state["status"]["JoystickDebugMode"]["enabled"]
+    # being in park doesn't unlock the other car-off settings
+    assert state["status"]["Mads"]["reason"] == REASON_OFFROAD
+    assert self.assert_refused(409, "Mads", False, onroad=True, parked=True) == REASON_OFFROAD
+
+    self.apply("JoystickDebugMode", False, onroad=True, parked=True)
+    self.apply("JoystickDebugMode", True, onroad=False)
+    assert self.params.get_bool("JoystickDebugMode")
 
   def test_dependency_and_capability(self):
     self.params.put_bool("CustomAccIncrementsEnabled", False, block=True)

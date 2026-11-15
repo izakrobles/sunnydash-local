@@ -299,9 +299,9 @@ function render() {
   const nav = el("nav", { "aria-label": "Settings pages" }, panels.map(p =>
     el("button", { class: p.id === panel.id ? "active" : "", onclick: () => { tab = p.id; render(); window.scrollTo(0, 0); showActiveTab(); } }, p.label)));
   const header = el("header", {}, el("h1", {}, el("span", { class: "dot" + (state.onroad ? " onroad" : "") }), "sunnypilot",
-    el("span", { id: "status" }, state.onroad ? (state.engaged ? "Driving · engaged" : "Driving") : "Parked")), nav);
+    el("span", { id: "status" }, !state.onroad ? "Car off" : state.engaged ? "Car on · engaged" : state.parked ? "Car on · in park" : "Car on")), nav);
   const main = el("main");
-  if (state.onroad) main.append(el("div", { class: "banner" }, "The car is on. Settings marked “park the car” unlock once it's off."));
+  if (state.onroad) main.append(el("div", { class: "banner" }, "The car is on. Settings marked “turn the car off” unlock once it's off."));
   if (panel.id === CONTROLLER_TAB) main.append(controllerView());
   if (panel.description) main.append(el("p", { class: "desc", style: "margin:0 4px" }, panel.description));
   for (const s of panel.sections) {
@@ -364,7 +364,7 @@ function paintController() {
   status.className = "ctl-status" + (c.live ? " live" : "");
   document.getElementById("ctl-status-text").textContent = c.live ? `Receiving · ${c.rate_hz} Hz` : "No controller input";
   document.getElementById("ctl-hint").textContent = c.live ? "" :
-    !c.joystick_mode ? "Joystick Debug Mode is off. Turn it on below, with the car parked, and the comma starts reading the controller." :
+    !c.joystick_mode ? "Joystick Debug Mode is off. Turn it on below, with the car off or stopped in park, and the comma starts reading the controller." :
     c.age === null ? "Joystick Debug Mode is on, but the comma doesn't see a controller. Check that the dongle is plugged in and the controller is switched on." :
     `Last input ${c.age < 60 ? c.age.toFixed(1) + " s" : Math.round(c.age / 60) + " min"} ago. Is the controller still switched on?`;
 

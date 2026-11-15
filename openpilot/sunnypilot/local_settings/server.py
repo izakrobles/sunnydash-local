@@ -30,6 +30,7 @@ LOCKOUT_FAILURES = 8          # wrong PINs within LOCKOUT_WINDOW_S before the pa
 LOCKOUT_WINDOW_S = 300.
 LOCKOUT_DURATION_S = 300.
 CAPS_CACHE_S = 5.
+CAR_STATE_STALE_S = 1.        # older than this, don't trust carState about being in park
 CONTROLLER_STALE_S = 0.2      # joystickd ignores controller input older than this
 CONTROLLER_ACCEL_SCALE = 4.0  # joystickd: accel request (m/s^2) = axes[0] * this
 
@@ -107,11 +108,31 @@ class PinGuard:
       return False
 
 
+def car_state_reader():
+  """Returns a function giving the newest carState as (age in seconds, gear, standstill), or None if nothing new."""
+  from openpilot.cereal import messaging
+  sock = messaging.sub_sock("carState", conflate=True)
+
+  def read():
+    msg = messaging.recv_one_or_none(sock)
+    if msg is None:
+      return None
+    cs = msg.carState
+    return time.monotonic() - msg.logMonoTime / 1e9, str(cs.gearShifter), bool(cs.standstill)
+  return read
+
+
 class DeviceState:
-  """Live inputs for the rules: car capabilities (cached), onroad and engaged."""
-  def __init__(self, params, caps_fn=None):
+  """Live inputs for the rules: car capabilities (cached), onroad, engaged and stopped-in-park."""
+  def __init__(self, params, caps_fn=None, car_state=None, clock=time.monotonic):
     self.params = params
     self._caps_fn = caps_fn
+    self._car_state = car_state
+    self._car_read = None
+    self._clock = clock
+    self._lock = threading.Lock()
+    self._parked = False
+    self._parked_t = -CAR_STATE_STALE_S
     self._caps: dict = {}
     self._caps_t = -CAPS_CACHE_S
 
@@ -134,6 +155,25 @@ class DeviceState:
 
   def engaged(self) -> bool:
     return self.params.get_bool("IsEngaged")
+
+  def parked(self) -> bool:
+    """Car on, stopped, shifter in park. Anything missing or stale counts as not parked."""
+    if not self.onroad():
+      return False
+    with self._lock:
+      now = self._clock()
+      try:
+        if self._car_read is None:
+          self._car_read = (self._car_state or car_state_reader)()
+        latest = self._car_read()
+      except Exception:
+        cloudlog.exception("local_settings: couldn't read carState")
+        return False
+      if latest is not None:
+        age, gear, standstill = latest
+        self._parked = gear == "park" and standstill
+        self._parked_t = now - max(0., age)
+      return self._parked and now - self._parked_t < CAR_STATE_STALE_S
 
 
 class ControllerFeed:
@@ -242,7 +282,7 @@ def make_handler(settings: Settings, device: DeviceState, guard: PinGuard, page:
       return True
 
     def _state(self):
-      return settings.state(device.caps(), device.onroad(), device.engaged())
+      return settings.state(device.caps(), device.onroad(), device.engaged(), device.parked())
 
     def do_GET(self):
       if not self._allowed():
@@ -290,7 +330,7 @@ def make_handler(settings: Settings, device: DeviceState, guard: PinGuard, page:
         return
 
       try:
-        settings.apply(key, value, device.caps(), device.onroad(), device.engaged())
+        settings.apply(key, value, device.caps(), device.onroad(), device.engaged(), device.parked())
       except SettingError as e:
         self._json(e.status, {"error": e.message, "state": self._state()})
         return
@@ -305,12 +345,13 @@ def make_handler(settings: Settings, device: DeviceState, guard: PinGuard, page:
   return Handler
 
 
-def make_server(params=None, port: int = PORT, host: str = "0.0.0.0", caps_fn=None, schema=None, controller_sub=None):
+def make_server(params=None, port: int = PORT, host: str = "0.0.0.0", caps_fn=None, schema=None, controller_sub=None,
+                car_state=None):
   params = params or Params()
   ensure_pin(params)
   with open(PAGE_PATH, "rb") as f:
     page = f.read()
-  handler = make_handler(Settings(params, schema), DeviceState(params, caps_fn), PinGuard(), page,
+  handler = make_handler(Settings(params, schema), DeviceState(params, caps_fn, car_state), PinGuard(), page,
                          ControllerFeed(params, controller_sub))
   server = ThreadingHTTPServer((host, port), handler)
   server.daemon_threads = True
