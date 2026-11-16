@@ -32,12 +32,12 @@ from openpilot.sunnypilot.selfdrive.car.car_specific import CarSpecificEventsSP
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
 from openpilot.sunnypilot.selfdrive.selfdrived.button_state_tracker import ButtonStateTracker
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+from openpilot.sunnypilot.selfdrive.controls.lib.follow_gap import FollowGapSync, gap_label, next_gap
 
 REPLAY = "REPLAY" in os.environ
 SIMULATION = "SIMULATION" in os.environ
 TESTING_CLOSET = "TESTING_CLOSET" in os.environ
 
-LONGITUDINAL_PERSONALITY_MAP = {v: k for k, v in log.LongitudinalPersonality.schema.enumerants.items()}
 
 ThermalStatus = log.DeviceState.ThermalStatus
 State = log.SelfdriveState.OpenpilotState
@@ -144,6 +144,9 @@ class SelfdriveD:
       max(log.LongitudinalPersonality.schema.enumerants.values()),
       self.params
     )
+    self.follow_gap = FollowGapSync(self.params.get("FollowGap"), self.personality)
+    self.personality = self.follow_gap.personality
+    self.follow_gap_lock = threading.Lock()
     self.recalibrating_seen = False
     self.dm_lockout_set = False
     self.dm_uncertain_alerted = False
@@ -511,11 +514,14 @@ class SelfdriveD:
     if CS.gearShifter == car.CarState.GearShifter.park and self.mads.enabled:
       self.events.remove(EventName.canBusMissing)
 
-    # Decrement personality on distance button press
+    # Step the following gap one closer on distance button press (wraps from closest to farthest)
     if self.CP.openpilotLongitudinalControl:
       if any(not be.pressed and be.type == ButtonType.gapAdjustCruise for be in CS.buttonEvents):
-        self.personality = (self.personality - 1) % 3
-        self.params.put('LongitudinalPersonality', self.personality)
+        with self.follow_gap_lock:
+          self.follow_gap.set_gap(next_gap(self.follow_gap.gap))
+          self.personality = self.follow_gap.personality
+          self.params.put('FollowGap', self.follow_gap.gap)
+          self.params.put('LongitudinalPersonality', self.personality)
         self.events.add(EventName.personalityChanged)
 
     self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric)
@@ -574,7 +580,8 @@ class SelfdriveD:
     if self.enabled or (ET.NO_ENTRY not in (c := self.state_machine.current_alert_types) and (ET.ENABLE in c or ET.USER_DISABLE in c)):
       clear_event_types.add(ET.NO_ENTRY)
 
-    pers = LONGITUDINAL_PERSONALITY_MAP[self.personality]
+    # the only alert that reads this is "Following Distance: ...", so hand it the gap step
+    pers = gap_label(self.follow_gap.gap)
     callback_args = [self.CP, CS, self.sm, self.is_metric,
                      self.state_machine.soft_disable_timer, pers]
 
@@ -629,6 +636,7 @@ class SelfdriveD:
     icbm.vTarget = self.icbm.v_target
 
     self.button_state_tracker.publish(ss_sp)
+    ss_sp.followGap = self.follow_gap.gap
 
     self.pm.send('selfdriveStateSP', ss_sp_msg)
 
@@ -659,7 +667,13 @@ class SelfdriveD:
       self.is_metric = self.params.get_bool("IsMetric")
       self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
-      self.personality = self.params.get("LongitudinalPersonality", return_default=True)
+      with self.follow_gap_lock:
+        gap_param = self.params.get("FollowGap")
+        personality_param = self.params.get("LongitudinalPersonality", return_default=True)
+        if self.follow_gap.update(gap_param, personality_param):
+          self.params.put("FollowGap", self.follow_gap.gap)
+          self.params.put("LongitudinalPersonality", self.follow_gap.personality)
+        self.personality = self.follow_gap.personality
 
       self.mads.read_params()
       time.sleep(0.1)

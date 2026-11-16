@@ -71,6 +71,7 @@ struct SelfdriveStateSP @0x81c2f05a394cf4af {
   intelligentCruiseButtonManagement @1 :IntelligentCruiseButtonManagement;
   buttonsPressed @2 :UInt16;
   buttonsReleaseToggle @3 :UInt16;
+  followGap @4 :UInt8;  # 1 (closest) to 5 (farthest); 0 when unknown
 
   enum AudibleAlert {
     none @0;

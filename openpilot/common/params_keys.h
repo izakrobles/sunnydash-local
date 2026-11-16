@@ -177,6 +177,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"DriverMonitorEarlyAlertConfidence", {PERSISTENT | BACKUP, INT, "80"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},
     {"EnableGithubRunner", {PERSISTENT | BACKUP, BOOL}},
+    {"FollowGap", {PERSISTENT | BACKUP, INT, "3"}},  // 1 (closest) to 5 (farthest), see follow_gap.py
     {"GreenLightAlert", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"GithubRunnerSufficientVoltage", {CLEAR_ON_MANAGER_START , BOOL}},
     {"HasAcceptedTermsSP", {PERSISTENT, STRING, "0"}},

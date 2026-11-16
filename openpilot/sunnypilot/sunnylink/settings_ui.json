@@ -594,10 +594,45 @@
               "description": "When enabled, pressing the accelerator pedal will disengage longitudinal control."
             },
             {
+              "key": "FollowGap",
+              "widget": "multiple_button",
+              "title": "Following Gap",
+              "description": "How far sunnypilot stays behind the car ahead, as seconds of travel: 1.0, 1.25, 1.45, 1.75 or 2.1 s. The gap grows with speed on its own. Each press of the steering wheel distance button moves one step closer, and the closest step wraps to the farthest. Steps 1-2 drive like Aggressive, 3 like Standard and 4-5 like Relaxed.",
+              "options": [
+                {
+                  "value": 1,
+                  "label": "1"
+                },
+                {
+                  "value": 2,
+                  "label": "2"
+                },
+                {
+                  "value": 3,
+                  "label": "3"
+                },
+                {
+                  "value": 4,
+                  "label": "4"
+                },
+                {
+                  "value": 5,
+                  "label": "5"
+                }
+              ],
+              "enablement": [
+                {
+                  "type": "capability",
+                  "field": "has_longitudinal_control",
+                  "equals": true
+                }
+              ]
+            },
+            {
               "key": "LongitudinalPersonality",
               "widget": "multiple_button",
               "title": "Driving Personality",
-              "description": "Standard is recommended. In aggressive mode, sunnypilot will follow lead cars closer and be more aggressive with the gas and brake. In relaxed mode sunnypilot will stay further away from lead cars. On supported cars, you can cycle through these personalities with your steering wheel distance button.",
+              "description": "Standard is recommended. In aggressive mode, sunnypilot will follow lead cars closer and be more aggressive with the gas and brake. In relaxed mode sunnypilot will stay further away from lead cars. Picking one here moves the Following Gap to its step (2, 3 or 4).",
               "options": [
                 {
                   "value": 0,

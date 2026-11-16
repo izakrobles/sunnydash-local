@@ -187,6 +187,9 @@ class Controls(ControlsExt):
     hudControl.lanesVisible = CC.enabled
     hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
     hudControl.leadDistanceBars = self.sm['selfdriveState'].personality.raw + 1
+    if self.CP.brand == "volkswagen" and self.sm['selfdriveStateSP'].followGap:
+      # VW clusters have five distance bars, one per following gap step
+      hudControl.leadDistanceBars = self.sm['selfdriveStateSP'].followGap
     hudControl.visualAlert = self.sm['selfdriveState'].alertHudVisual
 
     hudControl.rightLaneVisible = True

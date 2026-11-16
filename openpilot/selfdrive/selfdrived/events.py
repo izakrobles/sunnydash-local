@@ -193,7 +193,8 @@ def longitudinal_maneuver_alert(CP: car.CarParams, CS: car.CarState, sm: messagi
 
 
 def personality_changed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
-  personality = str(personality).title()
+  # selfdrived passes the following gap step as text ("2 of 5 (1.25 s)"); anything else is a personality enum
+  personality = personality if isinstance(personality, str) else str(personality).title()
   return NormalPermanentAlert(f"Following Distance: {personality}", duration=1.5)
 
 
