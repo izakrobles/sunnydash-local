@@ -3,7 +3,8 @@ import pyray as rl
 from openpilot.selfdrive.ui.mici.onroad import SIDE_PANEL_WIDTH
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.widgets import Widget
-from openpilot.system.ui.lib.application import gui_app
+from openpilot.system.ui.lib.application import gui_app, FontWeight
+from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.common.filter_simple import FirstOrderFilter
 
 from openpilot.selfdrive.ui.sunnypilot.mici.onroad.confidence_ball import ConfidenceBallSP
@@ -84,3 +85,15 @@ class ConfidenceBall(Widget, ConfidenceBallSP):
     draw_circle_gradient(content_rect.x + content_rect.width - status_dot_radius,
                          dot_height, status_dot_radius,
                          top_dot_color, bottom_dot_color)
+
+    # sunnydash: show the actual scene confidence number inside the dot while engaged
+    if ui_state.status == UIStatus.ENGAGED or self._demo:
+      pct = min(max(round(self._confidence_filter.x * 100), 0), 100)
+      font = gui_app.font(FontWeight.BOLD)
+      font_size = 18
+      text = str(pct)
+      text_size = measure_text_cached(font, text, font_size)
+      rl.draw_text_ex(font, text,
+                      rl.Vector2(content_rect.x + content_rect.width - status_dot_radius - text_size.x / 2,
+                                 dot_height - text_size.y / 2),
+                      font_size, 0, rl.Color(0, 0, 0, 210))

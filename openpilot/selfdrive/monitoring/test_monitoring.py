@@ -325,6 +325,7 @@ class TestConfidenceEarlyAlert(OpenpilotTestCase):
     assert abs(dm_sp.sceneConfidence - 0.9) < 1e-6
     assert abs(dm_sp.confidenceThreshold - 0.85) < 1e-6
     assert abs(dm_sp.leniency - 1.0) < 1e-6
+    assert 0. <= dm_sp.alertProgress <= 1.
 
   def test_leniency_scales_with_speed(self):
     for speed, expected in [(self.CITY, 0.), (30 * MPH, 0.), (self.RAMP_MID, 0.48), (55 * MPH, 1.),
@@ -332,27 +333,20 @@ class TestConfidenceEarlyAlert(OpenpilotTestCase):
       _, dm = self._run_early_seq(always_attentive[:10], 0.9, speed=speed)
       assert abs(dm.leniency - expected) < 0.05, f"{speed / MPH:.0f}mph gave {dm.leniency:.2f}"
 
-  def test_leniency_scales_with_attention(self):
-    # same confident highway scene, only the attention differs
+  def test_leniency_ignores_attention(self):
+    # confident highway scene: being on your phone does not shorten the timing
     _, attentive = self._run_early_seq(always_attentive[:10 * ONE_SECOND], 0.9, speed=self.HIGHWAY)
     _, distracted = self._run_early_seq(always_distracted[:10 * ONE_SECOND], 0.9, speed=self.HIGHWAY)
-    assert attentive.leniency > 0.9
-    assert distracted.leniency < 0.1
-    assert self._timings(attentive)[0] > 25.
-    assert self._timings(distracted)[0] < 6.
+    assert attentive.leniency > 0.99
+    assert distracted.leniency > 0.99
+    assert self._timings(distracted)[0] > 29.
 
-  def test_sustained_distraction_erodes_leniency(self):
-    # a glance is cheap, staying gone drains the allowance towards the stock timing
-    dm = DriverMonitoring()
-    dm.set_early_alert(True, 80)
-    leniencies = []
-    for i in range(10 * ONE_SECOND):
-      dm.scene_confidence_filter.x = 0.9
-      dm._update_states(msg_DISTRACTED, [0, 0, 0], self.HIGHWAY, True, False)
-      if i in (ONE_SECOND, 3 * ONE_SECOND, 8 * ONE_SECOND):
-        leniencies.append(dm.leniency)
-    assert leniencies[0] > leniencies[1] > leniencies[2]
-    assert leniencies[2] < 0.2
+  def test_confident_scene_gets_the_full_lenient_timing(self):
+    # 65 mph at 90% confidence: first chime at 30s even though the driver is gone the whole time
+    alert_lvls, _ = self._run_early_seq(always_distracted, 0.9, speed=self.HIGHWAY)
+    assert alert_lvls[15 * ONE_SECOND] == AlertLevel.none
+    assert alert_lvls[int(29 / DT_DMON)] == AlertLevel.none
+    assert alert_lvls[int(32 / DT_DMON)] == AlertLevel.one
 
   def test_lenient_timeouts_blend_with_leniency(self):
     dm = DriverMonitoring()
@@ -410,13 +404,35 @@ class TestConfidenceEarlyAlert(OpenpilotTestCase):
     assert alert_lvls.index(AlertLevel.two) == stock_lvls.index(AlertLevel.two)
     assert alert_lvls.index(AlertLevel.three) == stock_lvls.index(AlertLevel.three)
 
-  def test_confident_scene_and_attention_get_leniency(self):
-    msgs = [msg_ATTENTIVE] * (5 * ONE_SECOND) + [msg_DISTRACTED] * (30 * ONE_SECOND)
+  def test_confident_scene_keeps_leniency_after_looking_away(self):
+    msgs = [msg_ATTENTIVE] * (5 * ONE_SECOND) + [msg_DISTRACTED] * (40 * ONE_SECOND)
     alert_lvls, _ = self._run_early_seq(msgs, 0.9, speed=self.HIGHWAY)
-    first_one = alert_lvls.index(AlertLevel.one)
-    # stock would have chimed 5s after the driver looked away
-    assert alert_lvls[8 * ONE_SECOND] == AlertLevel.none
-    assert 12 * ONE_SECOND < first_one < 25 * ONE_SECOND
+    # after 5s of attention, looking away still earns the full leniency: no chime inside 20s
+    assert alert_lvls[20 * ONE_SECOND] == AlertLevel.none
+    assert alert_lvls.index(AlertLevel.one) > 24 * ONE_SECOND
+
+  def test_alert_progress_fills_at_the_alert_rate(self):
+    # city speed low confidence: full orange by the 5s stock first chime
+    _, dm = self._run_early_seq(always_distracted[:6 * ONE_SECOND], 0.5, speed=self.CITY)
+    assert abs(dm.alert_progress - 1.0) < 1e-6
+    _, dm = self._run_early_seq(always_distracted[:ONE_SECOND], 0.5, speed=self.CITY)
+    assert 0.1 < dm.alert_progress < 0.4
+
+  def test_alert_progress_takes_the_lenient_time_at_highway_speed(self):
+    _, dm = self._run_early_seq(always_distracted[:10 * ONE_SECOND], 0.9, speed=self.HIGHWAY)
+    assert 0.2 < dm.alert_progress < 0.5
+    _, dm = self._run_early_seq(always_distracted[:31 * ONE_SECOND], 0.9, speed=self.HIGHWAY)
+    assert abs(dm.alert_progress - 1.0) < 1e-6
+
+  def test_alert_progress_snaps_up_when_confidence_drops(self):
+    _, dm = self._run_early_seq(always_distracted[:int(1.4 / DT_DMON)], 0.5, speed=self.HIGHWAY)
+    assert dm.alert_progress > 0.9
+    assert dm.early_alert_active
+
+  def test_alert_progress_resets_when_looking_back(self):
+    msgs = [msg_DISTRACTED] * (2 * ONE_SECOND) + [msg_ATTENTIVE] * (3 * ONE_SECOND)
+    _, dm = self._run_early_seq(msgs, 0.9, speed=self.HIGHWAY)
+    assert dm.alert_progress == 0.
 
   def test_confidence_at_threshold_counts_as_confident(self):
     dm = DriverMonitoring()

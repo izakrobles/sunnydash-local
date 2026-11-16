@@ -107,9 +107,6 @@ class DRIVER_MONITOR_SETTINGS:
     # and the full leniency is earned at 55 mph and above.
     self._EARLY_ALERT_SPEED_MIN = 13.4   # 30 mph
     self._EARLY_ALERT_SPEED_FULL = 24.6  # 55 mph
-    # attention is smoothed over a few seconds: a glance barely dents the leniency, staying gone
-    # erodes it until the stock timing is back
-    self._EARLY_ALERT_ATTENTION_FILTER_TS = 2.5
     # seconds the driver must be certainly distracted before the urgent chime fires, at full speed.
     # The hold grows with the square of the inverse speed factor, so urgency is far more
     # speed-sensitive than leniency: about 1s at 55 mph+, 3s at 45 mph, and it never beats the
@@ -203,10 +200,9 @@ class DriverMonitoring:
     self.early_alert_active = False
     self.scene_confidence_filter = FirstOrderFilter(1., self.settings._SCENE_CONFIDENCE_FILTER_TS, DT_DMON)
     self.speed_factor = 0.
-    self.attention_factor = 1.
-    self.attention_filter = FirstOrderFilter(1., self.settings._EARLY_ALERT_ATTENTION_FILTER_TS, DT_DMON)
     self.leniency = 0.
     self.urgent_cnt = 0
+    self.alert_progress = 0.
 
     self._reset_awareness()
     self._set_policy(MonitoringPolicy.vision)
@@ -232,13 +228,15 @@ class DriverMonitoring:
                                         [0., 1.]))
 
   def _update_leniency(self):
-    # how much of the relaxed timing the current situation earns: nothing at city speeds, nothing
-    # once the scene confidence is too low to trust, and nothing while the driver is checked out.
+    # how much of the relaxed timing the current situation earns: nothing at city speeds and nothing
+    # once the scene confidence is too low to trust. Attention is deliberately not part of this: if
+    # the model is confident and you are on the highway, the lenient timing stands until the model
+    # loses confidence. Being checked out is what the urgent chime is for.
     low_confidence = self.scene_confidence_filter.x < self.early_alert_confidence
     if not self.early_alert_enabled or low_confidence:
       self.leniency = 0.
     else:
-      self.leniency = self.speed_factor * self.attention_factor
+      self.leniency = self.speed_factor
 
   def _update_early_alert(self, op_engaged, lowspeed, wrong_gear):
     s = self.settings
@@ -260,8 +258,7 @@ class DriverMonitoring:
       certainly_distracted = self.driver_distraction_filter.x > s._EARLY_ALERT_DISTRACTED_ON and self.driver_distracted
       if certainly_distracted and low_confidence and self.speed_factor > 0.:
         self.urgent_cnt += 1
-        hold_cnt = max(int(round(s._EARLY_ALERT_URGENT_HOLD / self.speed_factor ** 2 / DT_DMON)), 1)
-        self.early_alert_active = self.urgent_cnt >= hold_cnt
+        self.early_alert_active = self.urgent_cnt >= self._urgent_hold_cnt()
       else:
         self.urgent_cnt = 0
 
@@ -401,13 +398,6 @@ class DriverMonitoring:
     self._get_distracted_types()
     self.driver_distracted = any(self.distracted_types.values()) and driver_data.faceProb > self.settings._FACE_THRESHOLD and self.pose.low_std
     self.driver_distraction_filter.update(self.driver_distracted)
-    # 1.0 while clearly paying attention, 0.0 once stock would call you certainly distracted, then
-    # smoothed so a mirror check barely moves it while a sustained look-away drains it
-    instant_attention = float(np.interp(self.driver_distraction_filter.x,
-                                        [self.settings._EARLY_ALERT_DISTRACTED_OFF,
-                                         self.settings._EARLY_ALERT_DISTRACTED_ON], [1., 0.]))
-    self.attention_filter.update(instant_attention)
-    self.attention_factor = self.attention_filter.x
     self._update_leniency()
 
     # only update offsetter when driver is actively driving the car above a certain speed
@@ -438,6 +428,31 @@ class DriverMonitoring:
   def _update_events(self, driver_engaged, op_engaged, lowspeed, wrong_gear):
     self._update_awareness_events(driver_engaged, op_engaged, lowspeed, wrong_gear)
     self._update_early_alert(op_engaged, lowspeed, wrong_gear)
+    self._update_alert_progress()
+
+  def _urgent_hold_cnt(self):
+    if self.speed_factor <= 0.:
+      return 0
+    return max(int(round(self.settings._EARLY_ALERT_URGENT_HOLD / self.speed_factor ** 2 / DT_DMON)), 1)
+
+  def _update_alert_progress(self):
+    # How close we are to the first chime, which is what the on-screen eye shows: it fills up at the
+    # rate the current timing allows, so 5s of looking away turns it orange at city speed but takes
+    # 30s when the scene is confident on the highway. Looking back at the road drains it again.
+    if not self.early_alert_enabled:
+      self.alert_progress = 0.
+      return
+
+    denom = max(1. - self.threshold_alert_1, 1e-3)
+    awareness_progress = (1. - self.awareness) / denom
+
+    urgent_progress = 0.
+    if self.early_alert_active:
+      urgent_progress = 1.
+    elif self.urgent_cnt > 0:
+      urgent_progress = self.urgent_cnt / self._urgent_hold_cnt()
+
+    self.alert_progress = float(min(max(awareness_progress, urgent_progress), 1.))
 
   def _update_awareness_events(self, driver_engaged, op_engaged, lowspeed, wrong_gear):
     self.alert_level = AlertLevel.none
@@ -519,6 +534,7 @@ class DriverMonitoring:
     dm_sp.sceneConfidence = float(self.scene_confidence_filter.x)
     dm_sp.confidenceThreshold = float(self.early_alert_confidence)
     dm_sp.leniency = float(self.leniency)
+    dm_sp.alertProgress = float(self.alert_progress)
     return dat
 
   def get_state_packet(self, valid=True):

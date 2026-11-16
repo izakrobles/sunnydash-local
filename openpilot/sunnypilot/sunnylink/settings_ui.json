@@ -1815,7 +1815,7 @@
               "key": "DriverMonitorEarlyAlert",
               "widget": "toggle",
               "title": "Confidence-Based Early Alert",
-              "description": "Chime sooner when the driving model's confidence in the scene drops and you are clearly not looking at the road. Leniency scales with speed and attention, with stock timing at city speeds and up to 30, 45 and 60 seconds once you are on the highway and paying attention. This chime plays even when Quiet Mode is on."
+              "description": "Chime sooner when the driving model's confidence in the scene drops and you are clearly not looking at the road. Leniency scales with speed and confidence, with stock timing at city speeds and up to 30, 45 and 60 seconds on the highway when the model is confident. This chime plays even when Quiet Mode is on."
             },
             {
               "key": "DriverMonitorEarlyAlertConfidence",
