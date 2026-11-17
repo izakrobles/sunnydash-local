@@ -72,6 +72,7 @@ struct SelfdriveStateSP @0x81c2f05a394cf4af {
   buttonsPressed @2 :UInt16;
   buttonsReleaseToggle @3 :UInt16;
   followGap @4 :UInt8;  # 1 (closest) to 5 (farthest); 0 when unknown
+  brakeStopHold @5 :Bool;  # re-engaged after a braked stop: hold the car until the lead pulls away or the driver goes
 
   enum AudibleAlert {
     none @0;

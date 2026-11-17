@@ -24,6 +24,11 @@ from openpilot.selfdrive.car.helpers import convert_carControlSP, convert_to_cap
 
 from openpilot.sunnypilot.mads.helpers import set_alternative_experience, set_car_specific_params
 from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfaces
+from opendbc.sunnypilot.car.volkswagen.values_ext import VolkswagenFlagsSP
+from opendbc.sunnypilot.car.follow_gap_buttons import FollowGapButtons
+
+BRAKE_STOP_RESUME_BUTTONS = (car.CarState.ButtonEvent.Type.setCruise, car.CarState.ButtonEvent.Type.decelCruise,
+                             car.CarState.ButtonEvent.Type.accelCruise, car.CarState.ButtonEvent.Type.resumeCruise)
 
 REPLAY = "REPLAY" in os.environ
 
@@ -176,6 +181,7 @@ class Car:
     self.params.put("CarParamsSPPersistent", cp_sp_bytes)
 
     self.v_cruise_helper = VCruiseHelper(self.CP, self.CP_SP)
+    self.follow_gap_buttons = FollowGapButtons()
 
     self.is_metric = self.params.get_bool("IsMetric")
     self.initial_cruise_speed = self.params.get("InitialCruiseSpeedKph", return_default=True)
@@ -208,10 +214,18 @@ class Car:
       self.can_log_mono_time = messaging.log_from_bytes(can_strs[0]).logMonoTime
 
     self.v_cruise_helper.update_speed_limit_assist(self.is_metric, self.sm['longitudinalPlanSP'])
-    self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric)
+    # same distance page window as selfdrived: + / - presses it takes step the following gap instead of the set speed
+    gap_page_buttons = frozenset()
+    if self.CP.openpilotLongitudinalControl:
+      self.follow_gap_buttons.update(CS.buttonEvents)
+      gap_page_buttons = frozenset(self.follow_gap_buttons.page_presses)
+    self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric, gap_page_buttons)
     if self.sm['carControl'].enabled and not self.CC_prev.enabled:
       # Use CarState w/ buttons from the step selfdrived enables on
-      self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.initial_cruise_speed)
+      # Resume after a braked stop engages at a standstill with no button: keep the previous set speed, like Resume
+      brake_stop_resume = bool(self.CP_SP.flags & VolkswagenFlagsSP.BRAKE_STOP_RESUME) and self.CS_prev.standstill and \
+                          not any(b.type in BRAKE_STOP_RESUME_BUTTONS for b in self.CS_prev.buttonEvents)
+      self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.initial_cruise_speed, resume=brake_stop_resume)
 
     # TODO: mirror the carState.cruiseState struct?
     CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)

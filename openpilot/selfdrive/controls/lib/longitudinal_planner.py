@@ -119,6 +119,10 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
 
     output_a_target, self.mpc.source, _ = min(candidates, key=lambda c: c[0])
     self.output_should_stop = any(should_stop for _, _, should_stop in candidates)
+    # Re-engaged after a braked stop: stay stopped until the lead pulls away or the driver goes (selfdrived)
+    if sm['selfdriveStateSP'].brakeStopHold:
+      self.output_should_stop = True
+      output_a_target = min(output_a_target, 0.)
     self.output_a_target = np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)
 
     self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.output_a_target + a_prev) / 2.0

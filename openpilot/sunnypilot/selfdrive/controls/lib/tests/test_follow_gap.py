@@ -8,7 +8,7 @@ from openpilot.cereal import log
 
 from openpilot.sunnypilot.selfdrive.controls.lib.follow_gap import (
   FOLLOW_GAP_T, FollowGapSync, follow_time_from_state, gap_label, gap_to_personality, next_gap, personality_to_gap,
-  sanitize_gap,
+  sanitize_gap, step_gap,
 )
 
 P = log.LongitudinalPersonality
@@ -45,6 +45,11 @@ class TestFollowGap:
     assert follow_time_from_state(0) is None
     assert follow_time_from_state(1) == 1.0
     assert follow_time_from_state(5) == 2.1
+
+  def test_step_gap(self):
+    assert [step_gap(g, 0) for g in range(1, 6)] == [5, 1, 2, 3, 4]  # toggle cycles
+    assert [step_gap(g, -1) for g in range(1, 6)] == [1, 1, 2, 3, 4]  # closer stops at 1
+    assert [step_gap(g, 1) for g in range(1, 6)] == [2, 3, 4, 5, 5]  # farther stops at 5
 
   def test_label(self):
     assert gap_label(2) == "2 of 5 (1.25 s)"
@@ -93,3 +98,42 @@ class TestFollowGapSync:
     sync = FollowGapSync(3, P.standard)
     assert sync.update(9, P.standard)
     assert sync.gap == 3
+
+
+class TestGapPageSetSpeed:
+  """While the distance page is open, card hands + / - presses to the gap and the set speed must not move."""
+
+  def _helper(self):
+    from types import SimpleNamespace
+    from opendbc.car import structs
+    from openpilot.selfdrive.car.cruise import VCruiseHelper
+    h = VCruiseHelper(SimpleNamespace(pcmCruise=False), structs.CarParamsSP())
+    h.v_cruise_kph = 72.
+    return h
+
+  def _cs(self, events):
+    from types import SimpleNamespace
+    return SimpleNamespace(buttonEvents=events, cruiseState=SimpleNamespace(available=True, standstill=False, speed=0.,
+                           speedCluster=0.), vEgo=20., gasPressed=False)
+
+  def _tap(self, h, fgb, t):
+    from opendbc.car import structs
+    for pressed in (True, False):
+      events = [structs.CarState.ButtonEvent(type=t, pressed=pressed)]
+      fgb.update(events)
+      h.update_v_cruise(self._cs(events), True, True, frozenset(fgb.page_presses))
+
+  def test_plus_changes_speed_only_with_page_closed(self):
+    from opendbc.car import structs
+    from opendbc.sunnypilot.car.follow_gap_buttons import FollowGapButtons
+    ButtonType = structs.CarState.ButtonEvent.Type
+    h, fgb = self._helper(), FollowGapButtons()
+    for _ in range(3):  # settle the just-engaged state
+      h.update_v_cruise(self._cs([]), True, True)
+    self._tap(h, fgb, ButtonType.accelCruise)
+    speed = h.v_cruise_kph
+    assert speed > 72.
+    self._tap(h, fgb, ButtonType.gapAdjustCruise)
+    self._tap(h, fgb, ButtonType.accelCruise)
+    self._tap(h, fgb, ButtonType.decelCruise)
+    assert h.v_cruise_kph == speed

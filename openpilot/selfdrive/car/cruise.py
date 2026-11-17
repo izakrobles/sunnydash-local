@@ -42,7 +42,7 @@ class VCruiseHelper(VCruiseHelperSP):
   def v_cruise_initialized(self):
     return self.v_cruise_kph != V_CRUISE_UNSET
 
-  def update_v_cruise(self, CS, enabled, is_metric):
+  def update_v_cruise(self, CS, enabled, is_metric, gap_page_buttons=frozenset()):
     self.v_cruise_kph_last = self.v_cruise_kph
 
     self.get_minimum_set_speed(is_metric)
@@ -69,7 +69,7 @@ class VCruiseHelper(VCruiseHelperSP):
       self.v_cruise_cluster_kph = V_CRUISE_UNSET
 
     if not self.CP.pcmCruise or not self.CP_SP.pcmCruiseSpeed:
-      self.update_button_timers(CS, enabled)
+      self.update_button_timers(CS, enabled, gap_page_buttons)
 
   def _update_v_cruise_non_pcm(self, CS, enabled, is_metric):
     # handle button presses. TODO: this should be in state_control, but a decelCruise press
@@ -125,7 +125,7 @@ class VCruiseHelper(VCruiseHelperSP):
 
     self.v_cruise_kph = np.clip(round(self.v_cruise_kph, 1), self.v_cruise_min, V_CRUISE_MAX)
 
-  def update_button_timers(self, CS, enabled):
+  def update_button_timers(self, CS, enabled, gap_page_buttons=frozenset()):
     # increment timer for buttons still pressed
     for k in self.button_timers:
       if self.button_timers[k] > 0:
@@ -135,14 +135,17 @@ class VCruiseHelper(VCruiseHelperSP):
       if b.type.raw in self.button_timers:
         # Start/end timer and store current state on change of button pressed
         self.button_timers[b.type.raw] = 1 if b.pressed else 0
-        self.button_change_states[b.type.raw] = {"standstill": CS.cruiseState.standstill, "enabled": enabled}
+        # a + / - press taken by the open distance page steps the following gap, not the set speed
+        self.button_change_states[b.type.raw] = {"standstill": CS.cruiseState.standstill,
+                                                 "enabled": enabled and b.type.raw not in gap_page_buttons}
 
-  def initialize_v_cruise(self, CS, initial_speed: int) -> None:
+  def initialize_v_cruise(self, CS, initial_speed: int, resume: bool = False) -> None:
     # initializing is handled by the PCM
     if self.CP.pcmCruise:
       return
 
-    if any(b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents) and self.v_cruise_initialized:
+    resume = resume or any(b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents)
+    if resume and self.v_cruise_initialized:
       self.v_cruise_kph = self.v_cruise_kph_last
     else:
       self.v_cruise_kph = int(round(np.clip(max(CS.vEgo * CV.MS_TO_KPH, initial_speed), V_CRUISE_INITIAL, V_CRUISE_MAX)))

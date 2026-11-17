@@ -70,6 +70,13 @@ def next_gap(gap: int) -> int:
   return gap - 1 if gap > FOLLOW_GAP_MIN else FOLLOW_GAP_MAX
 
 
+def step_gap(gap: int, step: int) -> int:
+  """A distance button step: 0 cycles (next_gap), -1 / +1 go one closer / farther and stop at the ends."""
+  if step == 0:
+    return next_gap(gap)
+  return min(max(sanitize_gap(gap) + step, FOLLOW_GAP_MIN), FOLLOW_GAP_MAX)
+
+
 def gap_label(gap: int) -> str:
   gap = sanitize_gap(gap)
   return f"{gap} of {FOLLOW_GAP_MAX} ({FOLLOW_GAP_T[gap]:.2f} s)"

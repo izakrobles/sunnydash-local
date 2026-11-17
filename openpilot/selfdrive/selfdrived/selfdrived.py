@@ -30,9 +30,12 @@ from openpilot.sunnypilot.mads.mads import ModularAssistiveDrivingSystem
 from openpilot.sunnypilot import get_sanitize_int_param
 from openpilot.sunnypilot.selfdrive.car.car_specific import CarSpecificEventsSP
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
+from openpilot.sunnypilot.selfdrive.selfdrived.brake_stop_resume import BrakeStopResume
 from openpilot.sunnypilot.selfdrive.selfdrived.button_state_tracker import ButtonStateTracker
+from opendbc.sunnypilot.car.volkswagen.values_ext import VolkswagenFlagsSP
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
-from openpilot.sunnypilot.selfdrive.controls.lib.follow_gap import FollowGapSync, gap_label, next_gap
+from openpilot.sunnypilot.selfdrive.controls.lib.follow_gap import FollowGapSync, gap_label, step_gap
+from opendbc.sunnypilot.car.follow_gap_buttons import FollowGapButtons
 
 REPLAY = "REPLAY" in os.environ
 SIMULATION = "SIMULATION" in os.environ
@@ -183,6 +186,9 @@ class SelfdriveD:
 
     self.button_state_tracker = ButtonStateTracker()
 
+    self.follow_gap_buttons = FollowGapButtons()
+    self.brake_stop_resume = BrakeStopResume(bool(self.CP_SP.flags & VolkswagenFlagsSP.BRAKE_STOP_RESUME), DT_CTRL)
+
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
 
@@ -293,6 +299,10 @@ class SelfdriveD:
         (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or \
         (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
         self.events.add(EventName.pedalPressed)
+
+      # Resume after a braked stop: engage when a brake held to a full stop is released there
+      if self.brake_stop_resume.update(CS, self.enabled, self.sm['radarState'].leadOne):
+        self.events.add(EventName.buttonEnable)
 
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:
@@ -514,11 +524,16 @@ class SelfdriveD:
     if CS.gearShifter == car.CarState.GearShifter.park and self.mads.enabled:
       self.events.remove(EventName.canBusMissing)
 
-    # Step the following gap one closer on distance button press (wraps from closest to farthest)
+    # Following gap: the distance button cycles (toggle) or steps closer / farther, and while the distance page is open
+    # (4 s after a press) the cruise + / - buttons step it too, card keeps those presses off the set speed
     if self.CP.openpilotLongitudinalControl:
-      if any(not be.pressed and be.type == ButtonType.gapAdjustCruise for be in CS.buttonEvents):
+      steps = self.follow_gap_buttons.update(CS.buttonEvents)
+      if steps:
         with self.follow_gap_lock:
-          self.follow_gap.set_gap(next_gap(self.follow_gap.gap))
+          gap = self.follow_gap.gap
+          for step in steps:
+            gap = step_gap(gap, step)
+          self.follow_gap.set_gap(gap)
           self.personality = self.follow_gap.personality
           self.params.put('FollowGap', self.follow_gap.gap)
           self.params.put('LongitudinalPersonality', self.personality)
@@ -637,6 +652,7 @@ class SelfdriveD:
 
     self.button_state_tracker.publish(ss_sp)
     ss_sp.followGap = self.follow_gap.gap
+    ss_sp.brakeStopHold = self.brake_stop_resume.hold
 
     self.pm.send('selfdriveStateSP', ss_sp_msg)
 

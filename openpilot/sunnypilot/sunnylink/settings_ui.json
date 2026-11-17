@@ -2448,6 +2448,28 @@
         }
       ]
     },
+    "volkswagen": {
+      "title": "Volkswagen Settings",
+      "description": "",
+      "items": [
+        {
+          "key": "BrakeStopResume",
+          "widget": "toggle",
+          "title": "Resume After a Braked Stop",
+          "description": "With openpilot longitudinal on an MQB car. If you brake all the way to a full stop, letting off the brake while still stopped turns openpilot back on. It holds the car until the car ahead pulls away, or until you tap the gas or press RES. Letting off before the stop, or while rolling, leaves openpilot off as usual.",
+          "enablement": [
+            {
+              "type": "offroad_only"
+            },
+            {
+              "type": "capability",
+              "field": "has_longitudinal_control",
+              "equals": true
+            }
+          ]
+        }
+      ]
+    },
     "subaru": {
       "title": "Subaru Settings",
       "description": "",
